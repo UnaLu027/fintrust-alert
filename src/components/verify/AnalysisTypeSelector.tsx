@@ -6,6 +6,7 @@ const options: AnalysisType[] = [
   "exaggeration_detection",
   "investment_inducement_risk",
   "multi_source_verification",
+  "financial_statement_verification",
   "full_analysis",
 ];
 
