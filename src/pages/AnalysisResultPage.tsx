@@ -7,6 +7,7 @@ import { SourceTag } from "../components/common/SourceTag";
 import { RiskSummaryCard } from "../components/analysis/RiskSummaryCard";
 import { RiskReasonList } from "../components/analysis/RiskReasonList";
 import { SourceComparisonCard } from "../components/analysis/SourceComparisonCard";
+import { FinancialEvidencePanel } from "../components/analysis/FinancialEvidencePanel";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
 import { fixedDisclaimer } from "../content/disclaimers";
 
@@ -45,6 +46,10 @@ export function AnalysisResultPage() {
       </div>
 
       <RiskSummaryCard analysis={analysis} />
+
+      {analysis.financialEvidence && (
+        <FinancialEvidencePanel result={analysis.financialEvidence} />
+      )}
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold text-brand-navy">風險原因</h2>
