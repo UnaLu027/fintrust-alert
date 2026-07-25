@@ -14,6 +14,7 @@ export interface DashboardSummary {
 }
 
 export interface VerifyRequestPayload {
+  claimText?: string;
   keyword?: string;
   company?: string;
   ticker?: string;
