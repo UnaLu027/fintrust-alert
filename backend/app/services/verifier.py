@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from app.models import (
+    ClaimDirection,
+    ClaimVerificationResult,
+    ComparisonKind,
+    EvidenceCalculation,
+    ExtractedFinancialClaim,
+    VerificationVerdict,
+)
+from app.services.fact_repository import FinancialFactRepository
+
+
+def _direction_matches(direction: ClaimDirection, calculated: float) -> bool:
+    if direction in {ClaimDirection.INCREASE, ClaimDirection.HIGHER_THAN}:
+        return calculated > 0
+    if direction in {ClaimDirection.DECREASE, ClaimDirection.LOWER_THAN}:
+        return calculated < 0
+    if direction == ClaimDirection.EQUAL:
+        return calculated == 0
+    return True
+
+
+def verify_claim(
+    claim: ExtractedFinancialClaim,
+    repository: FinancialFactRepository,
+    tolerance_percentage_points: float = 2.0,
+) -> ClaimVerificationResult:
+    if not claim.ticker or not claim.metric:
+        return ClaimVerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.NOT_APPLICABLE,
+            explanation="無法辨識半導體公司或財務指標，因此不適用財報量化查證。",
+            limitations=["需要公司／股票代號與可對應的財務指標。"],
+        )
+
+    if not claim.period:
+        return ClaimVerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+            explanation="主張缺少明確財報期間，系統不會自行猜測『今年』或『最近』所指的期間。",
+            limitations=["請提供年度或季度，例如 2025 年全年或 2025 年第 2 季。"],
+        )
+
+    current = repository.get(claim.ticker, claim.metric, claim.period)
+    if current is None:
+        return ClaimVerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+            explanation="資料庫尚未取得此公司、指標與期間的官方財報欄位。",
+            limitations=["需先完成 MOPS Inline XBRL／TWSE 官方資料匯入。"],
+        )
+
+    comparison = None
+    if claim.comparison_period:
+        comparison = repository.get(claim.ticker, claim.metric, claim.comparison_period)
+        if comparison is None:
+            return ClaimVerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+                explanation="已找到本期數值，但缺少比較期間的官方資料，無法重新計算變化幅度。",
+                limitations=[f"缺少比較期間：{claim.comparison_period}"],
+            )
+
+    formula: str | None = None
+    calculated: float | None = None
+    expected: float | None = None
+
+    if claim.comparison_kind in {ComparisonKind.YOY, ComparisonKind.QOQ}:
+        if comparison is None or comparison.value == 0:
+            return ClaimVerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+                explanation="比較期數值不存在或為零，無法計算成長率。",
+            )
+        calculated = (current.value - comparison.value) / abs(comparison.value) * 100
+        expected = claim.claimed_change_percent
+        formula = (
+            f"({current.value:g} - {comparison.value:g}) / "
+            f"abs({comparison.value:g}) * 100 = {calculated:.2f}%"
+        )
+    elif claim.comparison_kind == ComparisonKind.PERCENTAGE_POINT:
+        if comparison is None:
+            return ClaimVerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+                explanation="缺少比較期比率，無法計算百分點差異。",
+            )
+        calculated = current.value - comparison.value
+        expected = claim.claimed_percentage_points
+        formula = f"{current.value:g} - {comparison.value:g} = {calculated:.2f} 個百分點"
+    elif claim.claimed_value is not None:
+        calculated = current.value
+        expected = claim.claimed_value
+        formula = f"官方值 = {current.value:g} {current.unit}"
+    elif claim.direction != ClaimDirection.UNSPECIFIED and comparison is not None:
+        calculated = current.value - comparison.value
+        formula = f"{current.value:g} - {comparison.value:g} = {calculated:.2f} {current.unit}"
+    else:
+        return ClaimVerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.NOT_APPLICABLE,
+            explanation="句子雖提及財務資訊，但沒有可執行的數值或方向主張。",
+        )
+
+    evidence = EvidenceCalculation(
+        metric=claim.metric,
+        period=claim.period,
+        comparison_period=claim.comparison_period,
+        current_value=current.value,
+        comparison_value=comparison.value if comparison else None,
+        unit=current.unit,
+        formula=formula,
+        calculated_value=round(calculated, 4) if calculated is not None else None,
+        tolerance_percentage_points=tolerance_percentage_points,
+        source_urls=list(
+            dict.fromkeys(
+                [current.source_url] + ([comparison.source_url] if comparison else [])
+            )
+        ),
+        is_demo=current.is_demo or bool(comparison and comparison.is_demo),
+    )
+
+    if expected is None:
+        assert calculated is not None
+        matches = _direction_matches(claim.direction, calculated)
+        return ClaimVerificationResult(
+            claim=claim,
+            verdict=(
+                VerificationVerdict.SUPPORTED
+                if matches
+                else VerificationVerdict.CONTRADICTED
+            ),
+            explanation=(
+                "官方數值的變化方向與主張一致。"
+                if matches
+                else "官方數值的變化方向與主張相反。"
+            ),
+            evidence=evidence,
+        )
+
+    assert calculated is not None
+    difference = abs(calculated - expected)
+    if difference <= tolerance_percentage_points:
+        verdict = VerificationVerdict.SUPPORTED
+        explanation = "重新計算結果落在設定的容許誤差內。"
+    elif difference <= tolerance_percentage_points * 2:
+        verdict = VerificationVerdict.PARTIALLY_SUPPORTED
+        explanation = "主張方向大致一致，但數值差異超過嚴格容許誤差。"
+    else:
+        verdict = VerificationVerdict.CONTRADICTED
+        explanation = "重新計算結果與主張的數值差異明顯，超出容許誤差。"
+
+    return ClaimVerificationResult(
+        claim=claim,
+        verdict=verdict,
+        explanation=explanation,
+        difference=round(difference, 4),
+        evidence=evidence,
+        limitations=(
+            ["目前使用 demo fixture；正式結果必須由官方 XBRL／OpenAPI 資料取代。"]
+            if evidence.is_demo
+            else []
+        ),
+    )
