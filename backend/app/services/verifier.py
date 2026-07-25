@@ -21,6 +21,16 @@ def _direction_matches(direction: ClaimDirection, calculated: float) -> bool:
     return True
 
 
+def _signed_expected(value: float | None, direction: ClaimDirection) -> float | None:
+    if value is None:
+        return None
+    if direction in {ClaimDirection.DECREASE, ClaimDirection.LOWER_THAN}:
+        return -abs(value)
+    if direction in {ClaimDirection.INCREASE, ClaimDirection.HIGHER_THAN}:
+        return abs(value)
+    return value
+
+
 def verify_claim(
     claim: ExtractedFinancialClaim,
     repository: FinancialFactRepository,
@@ -74,7 +84,7 @@ def verify_claim(
                 explanation="比較期數值不存在或為零，無法計算成長率。",
             )
         calculated = (current.value - comparison.value) / abs(comparison.value) * 100
-        expected = claim.claimed_change_percent
+        expected = _signed_expected(claim.claimed_change_percent, claim.direction)
         formula = (
             f"({current.value:g} - {comparison.value:g}) / "
             f"abs({comparison.value:g}) * 100 = {calculated:.2f}%"
@@ -87,7 +97,7 @@ def verify_claim(
                 explanation="缺少比較期比率，無法計算百分點差異。",
             )
         calculated = current.value - comparison.value
-        expected = claim.claimed_percentage_points
+        expected = _signed_expected(claim.claimed_percentage_points, claim.direction)
         formula = f"{current.value:g} - {comparison.value:g} = {calculated:.2f} 個百分點"
     elif claim.claimed_value is not None:
         calculated = current.value
