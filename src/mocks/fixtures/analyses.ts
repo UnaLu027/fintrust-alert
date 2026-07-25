@@ -7,12 +7,10 @@ function reason(code: RiskReasonCode): RiskReason {
 }
 
 /**
- * 4 canned demo scenarios (spec section 十五). Each one is cross-referenced
- * by id from dashboardStats.ts, pushAlerts.ts and historyRecords.ts so the
- * dashboard -> analysis result -> alerts/history flow resolves consistently.
+ * Canned demo scenarios. Each one is cross-referenced by id from dashboard,
+ * alerts and history fixtures so the full navigation flow remains coherent.
  */
 export const demoAnalyses: AnalysisResult[] = [
-  // Demo 1: 社群疑似假訊息
   {
     id: "demo-tsmc-crash-rumor",
     title: "台積電即將暴跌，內線消息外流？X 貼文瘋傳",
@@ -63,8 +61,6 @@ export const demoAnalyses: AnalysisResult[] = [
       },
     ],
   },
-
-  // Demo 2 (flagship example from spec section 七): 新聞待查證＋誇大表述
   {
     id: "demo-q2-revenue-surge",
     title: "台積電 Q2 營收將暴增 50%？法人：目標價上看 1000 元",
@@ -117,8 +113,6 @@ export const demoAnalyses: AnalysisResult[] = [
       },
     ],
   },
-
-  // Demo 3: 多來源不一致
   {
     id: "demo-multi-source-conflict",
     title: "鴻海海外新廠傳出投產延宕，法人看法分歧",
@@ -167,8 +161,6 @@ export const demoAnalyses: AnalysisResult[] = [
       },
     ],
   },
-
-  // Demo 4: 官方佐證更新
   {
     id: "demo-mops-confirmed",
     title: "台積電公開資訊觀測站公告：Q2 法說會重大訊息，資本支出上修",
@@ -218,6 +210,116 @@ export const demoAnalyses: AnalysisResult[] = [
         statusTag: "official_confirmed",
       },
     ],
+  },
+  {
+    id: "demo-semiconductor-financial-evidence",
+    title: "聯發科全年營收年增 45%？官方財報數值重新計算",
+    classification: "inconsistent",
+    relatedCompany: "聯發科",
+    relatedTicker: "2454",
+    sources: ["x", "yahoo", "mops"],
+    analyzedAt: "2026-07-25T18:20:00+08:00",
+    riskLevel: "medium",
+    riskScore: 68,
+    verificationStatus: "inconsistent",
+    hasOfficialSupport: true,
+    modelJudgmentSummary: "已找到可量化的官方財報證據，但重新計算結果與原始主張不一致。",
+    riskExplanationParagraph:
+      "此結果是以示範 fixture 驗證前端資料契約與計算揭露方式；正式版將由 MOPS Inline XBRL 與 TWSE OpenAPI 自動取得資料。",
+    riskReasons: [reason("financial_statement_mismatch"), reason("incomplete_information")],
+    analysisTypesRequested: ["financial_statement_verification"],
+    sourceComparisons: [
+      {
+        source: "x",
+        hasContent: true,
+        summary: "貼文宣稱「聯發科全年營收年增 45%，成長幅度遠高於市場預期」。",
+        handleOrOutlet: "@semiconductor_focus",
+        publishedAt: "2026-07-25T15:10:00+08:00",
+        modelJudgment: "包含公司、期間、指標與明確百分比，可進入財報量化查證",
+        riskTags: ["數值主張", "需財報查證"],
+        disclaimerText: sourceComparisonIntro.x,
+        statusTag: "pending",
+      },
+      {
+        source: "yahoo",
+        hasContent: true,
+        title: "半導體設計公司全年營收表現受關注",
+        handleOrOutlet: "Yahoo 財經",
+        publishedAt: "2026-07-25T16:00:00+08:00",
+        relationToOriginal: "partially_related",
+        modelJudgment: "新聞提供事件脈絡，但未直接證實 45% 的增幅",
+        disclaimerText: sourceComparisonIntro.yahoo,
+        statusTag: "pending",
+      },
+      {
+        source: "mops",
+        hasContent: true,
+        title: "聯發科年度合併綜合損益表與營收資料",
+        handleOrOutlet: "公開資訊觀測站／XBRL",
+        publishedAt: "2026-07-25T17:50:00+08:00",
+        relationToOriginal: "inconsistent",
+        modelJudgment: "依官方欄位重新計算的示範結果為 11.32%，與主張的 45% 不符",
+        disclaimerText: "",
+        statusTag: "official_confirmed",
+      },
+    ],
+    financialEvidence: {
+      industry: "半導體",
+      method: "claim_extraction_and_deterministic_recalculation",
+      overallVerdict: "contradicted",
+      summary:
+        "系統抽取到「聯發科全年營收年增 45%」的量化主張。依示範官方資料欄位重新計算，年增率為 11.32%，與原始主張相差 33.68 個百分點，超出 ±2 個百分點容許誤差。",
+      claims: [
+        {
+          claim: {
+            id: "claim-mediatek-revenue-yoy",
+            originalText: "聯發科全年營收年增 45%，成長幅度遠高於市場預期。",
+            companyName: "聯發科",
+            ticker: "2454",
+            semiconductorSubindustry: "IC 設計",
+            metric: "營業收入年增率",
+            period: "示範年度",
+            comparisonPeriod: "前一示範年度",
+            direction: "increase",
+            claimedChangePercent: 45,
+            unit: "%",
+            extractionConfidence: 0.96,
+          },
+          verdict: "contradicted",
+          explanation:
+            "公式與兩期數值均可取得，但重新計算結果與主張差距 33.68 個百分點，超出設定的容許誤差。",
+          difference: 33.68,
+          evidenceIds: ["evidence-mediatek-revenue-yoy"],
+        },
+      ],
+      evidence: [
+        {
+          id: "evidence-mediatek-revenue-yoy",
+          sourceName: "MVP 測試資料（待接 MOPS Inline XBRL）",
+          sourceUrl: "https://mops.twse.com.tw/",
+          sourceKind: "mvp_fixture",
+          statementType: "income_statement",
+          metric: "營業收入",
+          period: "示範年度",
+          comparisonPeriod: "前一示範年度",
+          currentValue: 590000,
+          comparisonValue: 530000,
+          unit: "百萬元",
+          formula: "(590,000 − 530,000) ÷ 530,000 × 100 = 11.32%",
+          calculatedValue: 11.32,
+          tolerance: 2,
+          lastUpdatedAt: "2026-07-25T17:50:00+08:00",
+          dataCoverage: "前端資料契約示範；數值不代表真實公司財報",
+          isDemo: true,
+        },
+      ],
+      limitations: [
+        "此筆數值是 UI／API 資料契約 fixture，不代表聯發科真實財報。",
+        "正式判定前必須由 MOPS Inline XBRL 或 TWSE 官方資料取代 fixture。",
+        "不同半導體子產業不可直接以單一財務比率進行投資優劣排名。",
+      ],
+      generatedAt: "2026-07-25T18:20:00+08:00",
+    },
   },
 ];
 
