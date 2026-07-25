@@ -2,19 +2,20 @@
 
 ## 慣例
 
-- Base URL：`/api`（目前由 MSW 於瀏覽器端攔截 mock；未來接真實後端時只需更換 base URL，前端呼叫方式不變）
-- 認證：除 `POST /api/auth/register`、`POST /api/auth/login` 外，其餘 endpoint 皆需帶 `Authorization: Bearer <token>`
+- 前端 mock Base URL：`/api`；目前由 MSW 於瀏覽器端攔截。
+- 財報證據服務 Base URL：`/api/v1/financial`；實作位於 `backend/`。
+- 認證：除 `POST /api/auth/register`、`POST /api/auth/login` 外，其餘使用者 endpoint 皆需帶 `Authorization: Bearer <token>`。
 - 錯誤格式統一為：
 
 ```json
 { "error": { "code": "invalid_credentials", "message": "帳號或密碼錯誤" } }
 ```
 
-- 型別名稱對應 `src/types/*.ts`（`AnalysisResult`、`User`、`PushAlert`、`HistoryRecord`、`WatchlistItem` 等）
+- 型別名稱對應 `src/types/*.ts`（`AnalysisResult`、`FinancialEvidenceResult`、`User`、`PushAlert`、`HistoryRecord`、`WatchlistItem` 等）。
 
 ---
 
-## 使用者對外 API（已於 MSW 完整 mock）
+## 使用者對外 API（目前由 MSW mock）
 
 ### 認證
 
@@ -23,7 +24,7 @@
 | POST | `/api/auth/register` | 註冊帳號並設定追蹤內容 | `RegisterPayload` | `{ token: string, user: User }` |
 | POST | `/api/auth/login` | 登入 | `{ email, password }` | `{ token: string, user: User }` |
 | POST | `/api/auth/logout` | 登出 | - | `{ ok: true }` |
-| GET | `/api/auth/me` | 以 token 取回目前登入使用者（供刷新頁面時還原登入狀態） | - | `{ user: User }` |
+| GET | `/api/auth/me` | 以 token 取回目前登入使用者 | - | `{ user: User }` |
 
 ### Dashboard（風險總覽）
 
@@ -38,13 +39,27 @@
 |---|---|---|---|---|
 | POST | `/api/verify/analyze` | 送出查證條件，觸發分析 | `VerifyRequestPayload` | `{ analysisId: string }` |
 
-> 真實後端串接時，此 endpoint 應改為：建立 `analysis_jobs`（若命中既有 `raw_items` 可重用），非同步呼叫 Python 模型服務，並回傳 `analysisId` 供前端輪詢或等待完成。
+`VerifyRequestPayload` 新增：
+
+- `claimText`：使用者直接貼上的 X／Yahoo 財經文字。
+- `analysisTypes` 可包含 `financial_statement_verification`。
+- 財報查證仍保留 `company`、`ticker`、URL 與日期區間作為提示條件。
+
+真實後端串接時，此 endpoint 應建立 `analysis_jobs`，並將可量化主張交給財報證據服務。不能由前端自行計算官方數值。
 
 ### 分析結果
 
 | Method | Path | 說明 | Response |
 |---|---|---|---|
-| GET | `/api/analysis/:id` | 取得完整分析結果（含風險原因、三來源比對） | `AnalysisResult` |
+| GET | `/api/analysis/:id` | 取得完整分析結果；若可量化，包含 `financialEvidence` | `AnalysisResult` |
+
+`financialEvidence` 包含：
+
+- claim-level 結果，而非整篇文章只有一個真假標籤
+- 抽取後的公司、半導體子產業、指標、期間、方向與數值
+- 官方本期值、比較值、公式、重新計算結果及容許誤差
+- supported／partially_supported／contradicted／insufficient_evidence／not_applicable
+- 來源連結、資料涵蓋限制與 `isDemo`
 
 ### 追蹤與推播提醒
 
@@ -69,29 +84,50 @@
 
 ---
 
-## 未來資料擷取端點（尚未 mock，供後端／爬蟲／模型團隊參考）
+## 財報證據服務 API（FastAPI MVP）
 
-這些 endpoint 不面向一般使用者，改用 service-to-service API key 驗證（例如 `X-Ingest-Key` header），而非使用者 JWT。
+| Method | Path | 說明 | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/v1/financial/health` | 回報方法、產業及歷史 XBRL readiness | - | `HealthResponse` |
+| GET | `/api/v1/financial/companies` | 取得可擴充的半導體公司 seed registry | - | `CompanyListResponse` |
+| POST | `/api/v1/financial/claims/extract` | 將中文財務敘述轉成結構化主張 | `ClaimExtractionRequest` | `ExtractedFinancialClaim` |
+| POST | `/api/v1/financial/claims/verify` | 查詢 facts 並以確定性公式驗證 | `ClaimVerificationRequest` | `ClaimVerificationResult` |
+| POST | `/api/v1/financial/facts/ingest` | 匯入已正規化的官方 XBRL／OpenAPI facts | `FactIngestRequest` | `{ inserted, warning }` |
+
+### 查證原則
+
+- 只有明確公司、指標與期間才進入量化查證。
+- 「今年」「最近」等相對期間不自動猜測。
+- 比較期缺失、官方資料未匯入或單位無法對齊時回傳 `insufficient_evidence`。
+- 數值與公式由 deterministic code 執行，生成式模型不直接決定官方數字。
+- seed registry 涵蓋半導體不同子產業；未來 peer comparison 僅允許同一子產業。
+
+---
+
+## 資料擷取端點（整體系統規劃）
+
+這些 endpoint 不面向一般使用者，正式版應採 service-to-service API key 驗證。
 
 | Method | Path | 呼叫方 | 說明 |
 |---|---|---|---|
-| POST | `/api/ingest/raw-item` | X 爬蟲／Yahoo 財經爬蟲／MOPS 擷取程式 | 寫入一筆 `raw_items`，欄位對應 `docs/schema.md` 的 `raw_items` 表。回傳 `{ rawItemId }`，並觸發建立對應的 `analysis_jobs` |
-| POST | `/api/ingest/analysis-result` | Python 真偽判斷模型服務 | 模型完成一個 `analysis_jobs` 後回寫結果：`riskLevel`、`riskScore`、`verificationStatus`、`riskReasons[]`、`sourceComparisons[]` 等，寫入 `analyses`／`risk_reasons`／`source_comparisons`，並觸發使用者 watchlist 比對以產生 `push_alerts` |
-| POST | `/api/ingest/webhook/job-failed` | Python 模型服務 | 任務失敗回呼，供錯誤追蹤與重試機制使用 |
-| GET | `/api/ingest/jobs/:id/status` | 內部服務／後台 | 輪詢 `analysis_jobs` 狀態（若未採用 webhook 通知） |
+| POST | `/api/ingest/raw-item` | X／Yahoo 財經擷取程式 | 寫入待查證文字與來源欄位 |
+| POST | `/api/v1/financial/facts/ingest` | MOPS XBRL／TWSE adapter | 寫入正規化官方財務 facts |
+| POST | `/api/ingest/analysis-result` | 模型與證據服務 | 回寫風險、來源比較與財報查證結果 |
+| POST | `/api/ingest/webhook/job-failed` | 內部服務 | 任務失敗回呼 |
+| GET | `/api/ingest/jobs/:id/status` | 內部服務／後台 | 查詢分析工作狀態 |
 
-### 資料流對應
-
-```
-POST /api/ingest/raw-item        → raw_items 新增一筆
-                                  → 系統建立 analysis_jobs（status=queued）
-Python 模型服務取件處理           → analysis_jobs.status=running
-POST /api/ingest/analysis-result → analyses / risk_reasons / source_comparisons 寫入
-                                  → analysis_jobs.status=done
-                                  → 比對 watchlist_items，產生 push_alerts（若符合條件）
+```text
+X／Yahoo raw item → claim detection／extraction
+                    ↓
+MOPS／TWSE facts → deterministic recalculation
+                    ↓
+claim-level verdict + evidence attribution
+                    ↓
+analysis result → watchlist matching → alerts
 ```
 
 ## 版本與驗證備註
 
-- 使用者端 API：JWT／session token（目前 mock 以 `Bearer token-<userId>` 模擬）
-- 擷取端 API（`/api/ingest/*`）：獨立的 service API key，與使用者驗證機制分開管理，避免爬蟲/模型服務的憑證與一般使用者權限混用
+- 使用者端 API：JWT／session token（目前 mock 以 `Bearer token-<userId>` 模擬）。
+- 擷取端 API：正式部署前必須增加獨立 service API key。
+- `facts/ingest` 目前只接受 normalized facts；MOPS Inline XBRL 自動下載與 taxonomy mapping 尚未完成，不得標示為已完成。
