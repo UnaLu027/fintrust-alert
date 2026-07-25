@@ -21,7 +21,7 @@ METRIC_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 PERCENT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(?:%|％)")
 PERCENTAGE_POINT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*個?百分點")
-NUMBER_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(兆|億|萬|百萬|元)?")
+AMOUNT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(兆|億|萬|百萬|元)")
 
 
 def _detect_metric(text: str) -> str | None:
@@ -58,9 +58,12 @@ def _detect_comparison_kind(text: str) -> ComparisonKind | None:
 
 
 def _number_with_unit(text: str) -> tuple[float | None, str | None]:
-    match = NUMBER_RE.search(text)
-    if not match:
+    matches = list(AMOUNT_RE.finditer(text))
+    if not matches:
         return None, None
+    # Prefer the last explicit amount so a year or stock ticker near the start of
+    # the sentence cannot be mistaken for the claimed financial value.
+    match = matches[-1]
     return float(match.group(1)), match.group(2)
 
 
@@ -81,6 +84,11 @@ def extract_claim(
         comparison_period = previous_year_same_period(period)
     elif not comparison_period and period and kind == ComparisonKind.QOQ:
         comparison_period = previous_quarter(period)
+    elif not comparison_period and period and kind == ComparisonKind.PERCENTAGE_POINT:
+        if re.search(r"去年同期|較去年|年增|年減|YoY", text, re.I):
+            comparison_period = previous_year_same_period(period)
+        elif re.search(r"上季|較上季|季增|季減|QoQ", text, re.I):
+            comparison_period = previous_quarter(period)
 
     pp_match = PERCENTAGE_POINT_RE.search(text)
     percent_match = PERCENT_RE.search(text)
