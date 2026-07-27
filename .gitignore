@@ -7,10 +7,24 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Frontend build and local environment
 node_modules
 dist
 dist-ssr
 *.local
+.firebase/
+
+# Python backend local files
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/data/
+backend/cloudrun.env.yaml
+backend/pytest-output.txt
+*.py[cod]
+*.sqlite3
 
 # Editor directories and files
 .vscode/*
