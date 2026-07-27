@@ -70,6 +70,9 @@ class HistoricalRuleResult(BaseModel):
     threshold_description: str
     evidence_periods: list[str] = Field(default_factory=list)
     evidence_metrics: list[str] = Field(default_factory=list)
+    rule_scope: str = "semiconductor_common"
+    logic_expression: str | None = None
+    actual_values: dict[str, float | None] = Field(default_factory=dict)
 
 
 class HistoricalFinancialAnalysisReport(BaseModel):
