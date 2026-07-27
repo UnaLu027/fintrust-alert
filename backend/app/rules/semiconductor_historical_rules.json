@@ -1,0 +1,97 @@
+{
+  "version": "semiconductor-history-mvp-0.1.0",
+  "industry": "半導體",
+  "threshold_basis": "公司自身 3–5 年年度資料的可調式 MVP 門檻；後續須以半導體子產業分布、中位數與 MAD 校準",
+  "rules": [
+    {
+      "rule_id": "SEM_HIST_DATA_001",
+      "name": "歷史資料涵蓋不足",
+      "category": "資料品質",
+      "operator": "minimum_available_years",
+      "thresholds": { "minimum": 3 },
+      "metrics": [],
+      "rationale": "少於三個完整年度時，不應產生長期趨勢結論。"
+    },
+    {
+      "rule_id": "SEM_HIST_GROWTH_001",
+      "name": "營收連續兩年衰退",
+      "category": "成長性",
+      "operator": "two_consecutive_below",
+      "thresholds": { "attention": 0.0, "high": -10.0 },
+      "metrics": ["revenue_growth_yoy"],
+      "rationale": "連續衰退比單一年度下滑更可能代表需求或產品週期壓力。"
+    },
+    {
+      "rule_id": "SEM_HIST_PROFIT_001",
+      "name": "毛利率明顯下滑",
+      "category": "獲利能力",
+      "operator": "latest_change_below",
+      "thresholds": { "attention": -3.0, "high": -5.0 },
+      "metrics": ["gross_margin"],
+      "rationale": "毛利率須以百分點變化判斷，並搭配產品組合、價格與產能利用率解讀。"
+    },
+    {
+      "rule_id": "SEM_HIST_INV_001",
+      "name": "存貨成長明顯高於營收",
+      "category": "營運效率",
+      "operator": "latest_gap_above",
+      "thresholds": { "attention": 15.0, "high": 30.0 },
+      "metrics": ["inventory_growth_yoy", "revenue_growth_yoy"],
+      "rationale": "存貨增速高於營收可能代表備貨、產品組合或去化壓力，不能只憑存貨增加單獨判定。"
+    },
+    {
+      "rule_id": "SEM_HIST_CASH_001",
+      "name": "淨利為正但營業現金流為負",
+      "category": "現金流品質",
+      "operator": "positive_profit_negative_ocf",
+      "thresholds": {},
+      "metrics": ["net_margin", "operating_cash_flow"],
+      "rationale": "獲利未轉化為營業現金時，應檢視應收帳款、存貨與非現金項目。"
+    },
+    {
+      "rule_id": "SEM_HIST_CASH_002",
+      "name": "現金轉換能力連續偏弱",
+      "category": "現金流品質",
+      "operator": "two_consecutive_below",
+      "thresholds": { "attention": 0.8, "high": 0.5 },
+      "metrics": ["cash_conversion_ratio"],
+      "rationale": "營業現金流相對淨利連續偏低，可能表示盈餘品質需要進一步查核。"
+    },
+    {
+      "rule_id": "SEM_HIST_FCF_001",
+      "name": "自由現金流轉負",
+      "category": "現金流品質",
+      "operator": "latest_or_two_negative",
+      "thresholds": {},
+      "metrics": ["free_cash_flow"],
+      "rationale": "資本密集半導體公司可能因擴產出現短期負自由現金流，因此需區分單年與連續兩年。"
+    },
+    {
+      "rule_id": "SEM_HIST_CAPEX_001",
+      "name": "資本支出強度高於歷史基準且自由現金流為負",
+      "category": "半導體資本投入",
+      "operator": "latest_above_median_with_negative",
+      "thresholds": { "attention_gap": 10.0, "high_gap": 20.0 },
+      "metrics": ["capex_intensity", "free_cash_flow"],
+      "rationale": "資本支出高本身不是負面訊號；只有明顯高於公司歷史基準且現金流承壓時才提高注意。"
+    },
+    {
+      "rule_id": "SEM_HIST_STRUCTURE_001",
+      "name": "負債比明顯上升且處於較高水準",
+      "category": "財務結構",
+      "operator": "latest_level_and_change_above",
+      "thresholds": { "level_attention": 70.0, "level_high": 85.0, "change_attention": 10.0 },
+      "metrics": ["debt_ratio"],
+      "rationale": "負債比需同時觀察絕對水準與自身歷史變化，不能直接套用跨產業固定標準。"
+    },
+    {
+      "rule_id": "SEM_HIST_RD_001",
+      "name": "研發投入趨勢",
+      "category": "半導體研發投入",
+      "operator": "informational_trend",
+      "thresholds": { "material_change": 2.0 },
+      "metrics": ["rd_intensity"],
+      "rationale": "研發投入可能具有遞延效益，本規則只提供中性趨勢觀察，不直接判定風險。"
+    }
+  ]
+}
