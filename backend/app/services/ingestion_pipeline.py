@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
@@ -12,6 +13,7 @@ from app.services.frontend_presenter import build_frontend_snapshot
 from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
 
 
+logger = logging.getLogger("fintrust.ingestion")
 TriggerKind = Literal["scheduler", "manual", "demo", "startup"]
 
 
@@ -43,19 +45,56 @@ class FinancialIngestionPipeline:
 
         run_id = uuid4().hex
         started_at = datetime.now(timezone.utc)
+        logger.info(
+            "pipeline_started run_id=%s ticker=%s subindustry=%s years=%s trigger=%s",
+            run_id,
+            profile.ticker,
+            profile.subindustry,
+            years,
+            trigger,
+        )
         try:
+            logger.info("stage=twse_fetch run_id=%s ticker=%s", run_id, profile.ticker)
             latest_report = await self.latest_service.analyze(profile.ticker)
+            logger.info(
+                "stage=twse_complete run_id=%s ticker=%s report_period=%s metrics=%s rules=%s",
+                run_id,
+                profile.ticker,
+                latest_report.report_period,
+                len(latest_report.metrics),
+                len(latest_report.rule_results),
+            )
+
+            logger.info("stage=mops_fetch run_id=%s ticker=%s years=%s", run_id, profile.ticker, years)
             historical_report = await self.historical_service.analyze(
                 profile.ticker,
                 years=years,
                 end_roc_year=end_year - 1911 if end_year is not None else None,
             )
+            logger.info(
+                "stage=mops_complete run_id=%s ticker=%s available_years=%s metrics=%s rules=%s rule_version=%s",
+                run_id,
+                profile.ticker,
+                historical_report.available_years,
+                len(historical_report.trend_metrics),
+                len(historical_report.rule_results),
+                historical_report.rule_version,
+            )
+
+            logger.info("stage=frontend_transform run_id=%s ticker=%s", run_id, profile.ticker)
             snapshot = build_frontend_snapshot(
                 run_id=run_id,
                 latest_report=latest_report,
                 historical_report=historical_report,
             )
             completed_at = datetime.now(timezone.utc)
+
+            logger.info(
+                "stage=persist run_id=%s ticker=%s backend=%s",
+                run_id,
+                profile.ticker,
+                self.repository.backend_name,
+            )
             persistence = self.repository.save_pipeline_result(
                 run_id=run_id,
                 trigger=trigger,
@@ -64,6 +103,16 @@ class FinancialIngestionPipeline:
                 latest_report=latest_report,
                 historical_report=historical_report,
                 snapshot=snapshot,
+            )
+            logger.info(
+                "pipeline_completed run_id=%s ticker=%s filings=%s facts=%s metrics=%s rules=%s snapshots=%s",
+                run_id,
+                profile.ticker,
+                persistence.filings,
+                persistence.facts,
+                persistence.metrics,
+                persistence.rule_results,
+                persistence.snapshots,
             )
             return CompanyRefreshResult(
                 run_id=run_id,
@@ -81,6 +130,12 @@ class FinancialIngestionPipeline:
             )
         except Exception as exc:
             completed_at = datetime.now(timezone.utc)
+            logger.exception(
+                "pipeline_failed run_id=%s ticker=%s error=%s",
+                run_id,
+                profile.ticker,
+                exc,
+            )
             return CompanyRefreshResult(
                 run_id=run_id,
                 ticker=profile.ticker,
