@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import time
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.historical_analysis_models import HistoricalPeriodRecord
@@ -298,6 +301,9 @@ class MopsInlineXbrlClient:
         xbrl_client: Any | None = None,
         parser: Any | None = None,
         require_arelle: bool = True,
+        cache_enabled: bool = True,
+        cache_dir: str | Path | None = None,
+        cache_ttl_hours: float | None = None,
     ) -> None:
         if MOPSXBRLClient is None or XBRLParser is None:
             raise MopsInlineXbrlError(
@@ -309,15 +315,59 @@ class MopsInlineXbrlClient:
             )
         self.xbrl_client = xbrl_client or MOPSXBRLClient()
         self.parser = parser or XBRLParser()
+        self.cache_enabled = cache_enabled
+        self.cache_dir = Path(
+            cache_dir
+            or os.getenv("MOPS_XBRL_CACHE_DIR", "./data/mops_ixbrl_cache")
+        )
+        self.cache_ttl_seconds = (
+            float(cache_ttl_hours)
+            if cache_ttl_hours is not None
+            else float(os.getenv("MOPS_XBRL_CACHE_TTL_HOURS", "24"))
+        ) * 3600
+
+    def _cache_path(self, profile: CompanyProfile, roc_year: int) -> Path:
+        return self.cache_dir / f"{profile.ticker}_{roc_year}_Q4_C.ixbrl"
+
+    def _read_cache(self, profile: CompanyProfile, roc_year: int) -> bytes | None:
+        if not self.cache_enabled:
+            return None
+        path = self._cache_path(profile, roc_year)
+        try:
+            age_seconds = time.time() - path.stat().st_mtime
+            if age_seconds <= self.cache_ttl_seconds:
+                return path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+        return None
+
+    def _write_cache(self, profile: CompanyProfile, roc_year: int, content: bytes) -> None:
+        if not self.cache_enabled:
+            return
+        path = self._cache_path(profile, roc_year)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_bytes(content)
+            temporary.replace(path)
+        except OSError:
+            # Cache failure must never turn a valid official download into an
+            # analysis failure. The next request will simply download again.
+            return
 
     async def fetch_annual(self, profile: CompanyProfile, roc_year: int) -> HistoricalPeriodRecord:
         try:
-            content = await self.xbrl_client.download_xbrl_async(
-                profile.ticker,
-                roc_year,
-                4,
-                report_type="C",
-            )
+            content = self._read_cache(profile, roc_year)
+            if content is None:
+                content = await self.xbrl_client.download_xbrl_async(
+                    profile.ticker,
+                    roc_year,
+                    4,
+                    report_type="C",
+                )
+                self._write_cache(profile, roc_year, content)
             package = self.parser.parse(content, profile.ticker, roc_year, 4)
         except (MOPSXBRLClientError, XBRLParserError) as exc:
             raise MopsInlineXbrlError(str(exc)) from exc
