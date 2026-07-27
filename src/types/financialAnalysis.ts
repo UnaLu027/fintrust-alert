@@ -1,0 +1,88 @@
+export type RuleSeverity =
+  | "positive"
+  | "normal"
+  | "attention"
+  | "high_attention"
+  | "data_issue"
+  | "insufficient_data";
+
+export interface SourceCoverage {
+  source_name: string;
+  source_url: string;
+  status: "available" | "missing" | "error";
+  report_period?: string;
+  fields_found: string[];
+  fields_missing: string[];
+}
+
+export interface NormalizedFinancialStatement {
+  ticker: string;
+  company_name: string;
+  industry: "半導體";
+  subindustry: string;
+  report_period?: string;
+  monthly_revenue_period?: string;
+  revenue?: number;
+  gross_profit?: number;
+  operating_income?: number;
+  net_income?: number;
+  eps?: number;
+  cash_and_cash_equivalents?: number;
+  inventory?: number;
+  current_assets?: number;
+  total_assets?: number;
+  current_liabilities?: number;
+  total_liabilities?: number;
+  equity?: number;
+  monthly_revenue?: number;
+  previous_month_revenue?: number;
+  prior_year_month_revenue?: number;
+  monthly_revenue_mom_reported?: number;
+  monthly_revenue_yoy_reported?: number;
+  currency_unit: string;
+  source_coverage: SourceCoverage[];
+  data_quality_warnings: string[];
+}
+
+export interface CalculatedMetric {
+  code: string;
+  label: string;
+  category: string;
+  value: number;
+  unit: string;
+  formula: string;
+  inputs: Record<string, number>;
+  source_fields: string[];
+}
+
+export interface RuleResult {
+  rule_id: string;
+  name: string;
+  category: string;
+  severity: RuleSeverity;
+  triggered: boolean;
+  metric_code: string;
+  actual_value?: number;
+  unit?: string;
+  threshold_description: string;
+  explanation: string;
+  evidence_metrics: string[];
+}
+
+export interface FinancialStatementAnalysisReport {
+  ticker: string;
+  company_name: string;
+  industry: "半導體";
+  subindustry: string;
+  report_period?: string;
+  monthly_revenue_period?: string;
+  analyzed_at: string;
+  rule_version: string;
+  threshold_basis: string;
+  overall_severity: RuleSeverity;
+  summary: string;
+  statement: NormalizedFinancialStatement;
+  metrics: CalculatedMetric[];
+  rule_results: RuleResult[];
+  limitations: string[];
+}
