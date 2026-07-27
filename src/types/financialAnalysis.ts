@@ -86,3 +86,84 @@ export interface FinancialStatementAnalysisReport {
   rule_results: RuleResult[];
   limitations: string[];
 }
+
+export interface HistoricalPeriodRecord {
+  ticker: string;
+  company_name: string;
+  subindustry: string;
+  fiscal_year: number;
+  roc_year: number;
+  quarter: 4;
+  period: string;
+  source_name: string;
+  source_url: string;
+  status: "available" | "missing" | "error";
+  revenue?: number;
+  gross_profit?: number;
+  operating_income?: number;
+  net_income?: number;
+  eps?: number;
+  cash_and_cash_equivalents?: number;
+  inventory?: number;
+  current_assets?: number;
+  total_assets?: number;
+  current_liabilities?: number;
+  total_liabilities?: number;
+  equity?: number;
+  operating_cash_flow?: number;
+  investing_cash_flow?: number;
+  capital_expenditure?: number;
+  research_and_development_expense?: number;
+  currency_unit: string;
+  fields_found: string[];
+  fields_missing: string[];
+  concept_matches: Record<string, string>;
+  warnings: string[];
+}
+
+export interface HistoricalTrendMetric {
+  code: string;
+  label: string;
+  category: string;
+  unit: string;
+  period_values: Record<string, number>;
+  latest_value?: number;
+  previous_value?: number;
+  change_percent?: number;
+  change_percentage_points?: number;
+  formula: string;
+  source_fields: string[];
+}
+
+export interface HistoricalRuleResult {
+  rule_id: string;
+  name: string;
+  category: string;
+  severity: RuleSeverity;
+  triggered: boolean;
+  explanation: string;
+  threshold_description: string;
+  evidence_periods: string[];
+  evidence_metrics: string[];
+}
+
+export interface HistoricalFinancialAnalysisReport {
+  ticker: string;
+  company_name: string;
+  industry: "半導體";
+  subindustry: string;
+  requested_years: number;
+  available_years: number;
+  start_year?: number;
+  end_year?: number;
+  analyzed_at: string;
+  source_method: string;
+  rule_version: string;
+  threshold_basis: string;
+  overall_severity: RuleSeverity;
+  summary: string;
+  periods: HistoricalPeriodRecord[];
+  trend_metrics: HistoricalTrendMetric[];
+  rule_results: HistoricalRuleResult[];
+  limitations: string[];
+}
