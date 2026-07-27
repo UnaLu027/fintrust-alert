@@ -1,9 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { financialApiUrl } from "../lib/financialApi";
 import type { HistoricalFinancialAnalysisReport } from "../types";
-
-const financialApiBase = (
-  import.meta.env.VITE_FINANCIAL_API_BASE_URL ?? "http://localhost:8000"
-).replace(/\/$/, "");
 
 async function fetchHistoricalFinancialAnalysis(
   ticker: string,
@@ -11,7 +8,9 @@ async function fetchHistoricalFinancialAnalysis(
 ): Promise<HistoricalFinancialAnalysisReport> {
   const params = new URLSearchParams({ years: String(years) });
   const response = await fetch(
-    `${financialApiBase}/api/v1/financial/statements/${encodeURIComponent(ticker)}/history?${params}`,
+    financialApiUrl(
+      `/api/v1/financial/statements/${encodeURIComponent(ticker)}/history?${params}`,
+    ),
     { headers: { Accept: "application/json" } },
   );
   const body = await response.json().catch(() => null);
