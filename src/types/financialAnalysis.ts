@@ -145,6 +145,9 @@ export interface HistoricalRuleResult {
   threshold_description: string;
   evidence_periods: string[];
   evidence_metrics: string[];
+  rule_scope: string;
+  logic_expression?: string;
+  actual_values: Record<string, number | null>;
 }
 
 export interface HistoricalFinancialAnalysisReport {
@@ -165,5 +168,59 @@ export interface HistoricalFinancialAnalysisReport {
   periods: HistoricalPeriodRecord[];
   trend_metrics: HistoricalTrendMetric[];
   rule_results: HistoricalRuleResult[];
+  limitations: string[];
+}
+
+export interface FrontendMetricCard {
+  code: string;
+  label: string;
+  category: string;
+  unit: string;
+  latest_value?: number;
+  previous_value?: number;
+  change_percent?: number;
+  change_percentage_points?: number;
+  formula: string;
+  period_values: Record<string, number>;
+}
+
+export interface FrontendRuleCard {
+  rule_id: string;
+  name: string;
+  category: string;
+  severity: RuleSeverity;
+  triggered: boolean;
+  explanation: string;
+  threshold_description: string;
+  evidence_periods: string[];
+  evidence_metrics: string[];
+  rule_scope: string;
+  logic_expression?: string;
+  actual_values: Record<string, number | null>;
+}
+
+export interface FrontendSourceItem {
+  source_name: string;
+  source_url: string;
+  period?: string;
+  status: string;
+}
+
+export interface FrontendAnalysisSnapshot {
+  schema_version: string;
+  analysis_run_id: string;
+  ticker: string;
+  company_name: string;
+  industry: "半導體";
+  subindustry: string;
+  generated_at: string;
+  data_updated_at: string;
+  overall_severity: RuleSeverity;
+  summary: string;
+  rule_version: string;
+  threshold_basis: string;
+  key_metrics: FrontendMetricCard[];
+  rule_cards: FrontendRuleCard[];
+  sources: FrontendSourceItem[];
   limitations: string[];
 }
