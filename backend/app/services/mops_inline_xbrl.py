@@ -23,7 +23,7 @@ class MopsInlineXbrlError(RuntimeError):
 
 MOPS_DOWNLOAD_TEMPLATE = (
     "https://mopsov.twse.com.tw/server-java/FileDownLoad"
-    "?functionName=t164sb01&step=9&co_id={ticker}&year={year}"
+    "?functionName=t164sb01&step=9&co_id={ticker}&year={roc_year}"
     "&season=4&report_id=C"
 )
 
@@ -100,6 +100,8 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+STATEMENT_TYPES = ("income_statement", "balance_sheet", "cash_flow")
+
 
 def _normalized_token(value: Any) -> str:
     text = str(value or "").casefold()
@@ -156,6 +158,7 @@ def normalize_mops_annual_statement(
     items: Iterable[Any],
     *,
     source_url: str | None = None,
+    warnings: list[str] | None = None,
 ) -> HistoricalPeriodRecord:
     item_list = list(items)
     values: dict[str, float | None] = {}
@@ -174,11 +177,13 @@ def normalize_mops_annual_statement(
                 concept_matches[canonical] = matched_name
 
     fiscal_year = roc_year + 1911
-    warnings: list[str] = []
+    record_warnings = list(warnings or [])
     core_found = sum(values[field] is not None for field in ("revenue", "total_assets", "net_income"))
     status = "available" if core_found >= 2 else "missing"
     if status == "missing":
-        warnings.append("MOPS iXBRL 已下載，但核心財報欄位不足，可能是 taxonomy mapping 尚未涵蓋該年度概念。")
+        record_warnings.append(
+            "MOPS iXBRL 已下載，但核心財報欄位不足，可能是 taxonomy mapping 尚未涵蓋該年度概念。"
+        )
 
     return HistoricalPeriodRecord(
         ticker=profile.ticker,
@@ -188,12 +193,12 @@ def normalize_mops_annual_statement(
         roc_year=roc_year,
         period=f"{fiscal_year}FY",
         source_url=source_url
-        or MOPS_DOWNLOAD_TEMPLATE.format(ticker=profile.ticker, year=fiscal_year),
+        or MOPS_DOWNLOAD_TEMPLATE.format(ticker=profile.ticker, roc_year=roc_year),
         status=status,
         fields_found=found,
         fields_missing=missing,
         concept_matches=concept_matches,
-        warnings=warnings,
+        warnings=record_warnings,
         **values,
     )
 
@@ -216,24 +221,32 @@ class MopsInlineXbrlClient:
             self.fetcher = FinancialFetcher()
 
     async def fetch_annual(self, profile: CompanyProfile, roc_year: int) -> HistoricalPeriodRecord:
-        try:
-            # twmops 0.1.2 parses the full filing package into simplified items;
-            # one download is sufficient for income, balance-sheet and cash-flow concepts.
-            statement = await self.fetcher.get_simplified_statement_async(
-                stock_id=profile.ticker,
-                year=roc_year,
-                quarter=4,
-                statement_type="income_statement",
-            )
-        except FinancialFetcherError as exc:
-            raise MopsInlineXbrlError(str(exc)) from exc
-        except Exception as exc:
-            raise MopsInlineXbrlError(f"MOPS iXBRL 下載或解析失敗：{exc}") from exc
+        combined_items: list[Any] = []
+        warnings: list[str] = []
+
+        for statement_type in STATEMENT_TYPES:
+            try:
+                statement = await self.fetcher.get_simplified_statement_async(
+                    stock_id=profile.ticker,
+                    year=roc_year,
+                    quarter=4,
+                    statement_type=statement_type,
+                )
+                combined_items.extend(getattr(statement, "items", []))
+            except FinancialFetcherError as exc:
+                warnings.append(f"{statement_type} 取得失敗：{exc}")
+            except Exception as exc:
+                warnings.append(f"{statement_type} 下載或解析失敗：{exc}")
+
+        if not combined_items:
+            detail = "；".join(warnings) or "查無可解析的財報項目"
+            raise MopsInlineXbrlError(detail)
 
         return normalize_mops_annual_statement(
             profile,
             roc_year,
-            getattr(statement, "items", []),
+            combined_items,
+            warnings=warnings,
         )
 
     async def fetch_history(
@@ -254,12 +267,14 @@ class MopsInlineXbrlClient:
 
         # Try at most two additional years so an annual filing not yet published
         # does not prevent returning the requested number of available periods.
-        while len(periods) < years and attempts < years + 2:
+        while (
+            sum(period.status == "available" for period in periods) < years
+            and attempts < years + 2
+        ):
             attempts += 1
             try:
                 record = await self.fetch_annual(profile, candidate)
-                if record.status == "available":
-                    periods.append(record)
+                periods.append(record)
             except MopsInlineXbrlError as exc:
                 fiscal_year = candidate + 1911
                 periods.append(
@@ -272,7 +287,7 @@ class MopsInlineXbrlClient:
                         period=f"{fiscal_year}FY",
                         source_url=MOPS_DOWNLOAD_TEMPLATE.format(
                             ticker=profile.ticker,
-                            year=fiscal_year,
+                            roc_year=candidate,
                         ),
                         status="error",
                         warnings=[str(exc)],
