@@ -1,0 +1,24 @@
+{
+  "version": "ic-design-history-0.1.0",
+  "subindustry": "IC 設計",
+  "threshold_basis": "IC 設計研發、產品組合與存貨特性＋公司自身歷史趨勢；門檻為可調整 MVP 參數",
+  "rules": [
+    {
+      "rule_id": "ICDESIGN_RD_INVENTORY_001",
+      "name": "研發投入、營收與存貨轉化壓力",
+      "category": "IC 設計研發與產品去化",
+      "rule_scope": "ic_design",
+      "operator": "ic_design_rd_conversion_pressure",
+      "logic_expression": "rd_intensity_change_pp >= rd_change_min AND revenue_growth_yoy < 0 AND inventory_growth_yoy - revenue_growth_yoy >= inventory_gap AND cash_conversion_ratio < cash_conversion_max",
+      "thresholds": {
+        "rd_change_min": 0.0,
+        "attention_inventory_gap": 15.0,
+        "high_inventory_gap": 30.0,
+        "attention_cash_conversion_max": 0.8,
+        "high_cash_conversion_max": 0.5
+      },
+      "metrics": ["rd_intensity", "revenue_growth_yoy", "inventory_growth_yoy", "cash_conversion_ratio"],
+      "rationale": "研發強度提高不直接列為風險；只有當營收下滑、存貨增速明顯高於營收且現金轉換偏弱時，才提示研發投入轉化與產品去化壓力。"
+    }
+  ]
+}
