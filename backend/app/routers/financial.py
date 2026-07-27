@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies import get_fact_repository
 from app.financial_analysis_models import (
     FinancialStatementAnalysisReport,
     RuleCatalogResponse,
 )
+from app.historical_analysis_models import HistoricalFinancialAnalysisReport
 from app.models import (
     ClaimExtractionRequest,
     ClaimVerificationRequest,
@@ -23,6 +26,8 @@ from app.services.financial_analysis_service import (
     UnsupportedCompanyError,
 )
 from app.services.financial_rule_engine import FinancialRuleEngine
+from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
+from app.services.mops_inline_xbrl import MopsInlineXbrlError
 from app.services.twse_openapi import TwseOpenApiError
 from app.services.verifier import verify_claim
 
@@ -33,10 +38,10 @@ router = APIRouter(prefix="/api/v1/financial", tags=["financial-evidence"])
 def health() -> HealthResponse:
     return HealthResponse(
         module="semiconductor_financial_rule_engine_mvp",
-        method="live_twse_ingestion_and_versioned_deterministic_rules",
+        method="live_twse_snapshot_plus_mops_ixbrl_history_and_versioned_rules",
         twse_openapi_ready=True,
         rule_engine_ready=True,
-        historical_xbrl_ready=False,
+        historical_xbrl_ready=True,
     )
 
 
@@ -69,6 +74,38 @@ async def analyze_financial_statement(ticker: str) -> FinancialStatementAnalysis
         raise HTTPException(
             status_code=502,
             detail=f"無法取得臺灣證券交易所財報資料：{exc}",
+        ) from exc
+
+
+@router.get(
+    "/statements/{ticker}/history",
+    response_model=HistoricalFinancialAnalysisReport,
+)
+async def analyze_historical_financial_statements(
+    ticker: str,
+    years: int = Query(default=5, ge=3, le=5),
+    end_year: int | None = Query(
+        default=None,
+        ge=2019,
+        le=datetime.now().year,
+        description="最後一個財報年度（西元年）；未提供時使用最近已完成年度。",
+    ),
+) -> HistoricalFinancialAnalysisReport:
+    end_roc_year = end_year - 1911 if end_year is not None else None
+    try:
+        return await HistoricalFinancialAnalysisService().analyze(
+            ticker,
+            years=years,
+            end_roc_year=end_roc_year,
+        )
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MopsInlineXbrlError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}",
         ) from exc
 
 
