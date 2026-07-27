@@ -33,9 +33,15 @@ SEMICONDUCTOR_COMPANIES: dict[str, CompanyProfile] = {
 }
 
 
+def get_company(ticker: str) -> CompanyProfile | None:
+    return SEMICONDUCTOR_COMPANIES.get(ticker.strip())
+
+
 def find_company(text: str, ticker_hint: str | None = None) -> CompanyProfile | None:
-    if ticker_hint and ticker_hint in SEMICONDUCTOR_COMPANIES:
-        return SEMICONDUCTOR_COMPANIES[ticker_hint]
+    if ticker_hint:
+        company = get_company(ticker_hint)
+        if company:
+            return company
 
     normalized = text.casefold()
     for company in SEMICONDUCTOR_COMPANIES.values():
