@@ -125,4 +125,6 @@ class HealthResponse(BaseModel):
     module: str
     industry: Literal["半導體"] = "半導體"
     method: str
+    twse_openapi_ready: bool = True
+    rule_engine_ready: bool = True
     historical_xbrl_ready: bool
