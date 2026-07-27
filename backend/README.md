@@ -23,6 +23,8 @@
 - 計算營收年增率、毛利率、營業利益率、淨利率、存貨年增率、現金轉換比、自由現金流、資本支出強度、研發強度、負債比與流動比率
 - 公司自身歷史複合規則：連續營收衰退、毛利率下滑、存貨成長高於營收、獲利與現金流背離、負自由現金流、資本支出壓力、負債比變化與研發趨勢
 - 下載或 taxonomy mapping 失敗時保留 error／missing，不以零值補齊
+- 原始 iXBRL 預設快取 24 小時，避免使用者重複按鈕造成不必要的官方請求
+- 已以 GitHub Actions 實際下載並解析台積電 2024 年度 iXBRL，live smoke test 通過
 
 ### 可解釋規則輸出
 
@@ -56,6 +58,7 @@ TWSE OpenAPI
 
 ```text
 MOPS consolidated annual iXBRL
+  → 原始文件快取
   → Arelle 解析 facts／contexts／labels
   → 選取當年度 annual／instant context
   → taxonomy alias mapping
@@ -105,6 +108,13 @@ VITE_FINANCIAL_API_BASE_URL=https://你的後端網址
 CORS_ALLOW_ORIGINS=https://你的前端網址,http://localhost:5173
 ```
 
+MOPS 快取可選設定：
+
+```text
+MOPS_XBRL_CACHE_DIR=./data/mops_ixbrl_cache
+MOPS_XBRL_CACHE_TTL_HOURS=24
+```
+
 ## 不需要使用者手動處理的項目
 
 - 不需要自行下載財報
@@ -117,7 +127,8 @@ CORS_ALLOW_ORIGINS=https://你的前端網址,http://localhost:5173
 1. 部署 `backend/` FastAPI 服務。
 2. 在前端設定 `VITE_FINANCIAL_API_BASE_URL`。
 3. 在後端設定 `CORS_ALLOW_ORIGINS`。
-4. 若部署平台對 MOPS 無法連線，需更換可連線的後端區域或主機；程式不會要求使用者改用手動上傳。
+4. 部署平台應提供可寫入的快取目錄；無持久磁碟時系統仍可運作，但重啟後會重新下載。
+5. 若部署平台對 MOPS 無法連線，需更換可連線的後端區域或主機；程式不會要求使用者改用手動上傳。
 
 ## 現階段限制
 
