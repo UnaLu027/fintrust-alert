@@ -1,0 +1,23 @@
+{
+  "version": "packaging-testing-history-0.1.0",
+  "subindustry": "封裝測試",
+  "threshold_basis": "封裝測試營運資金、產能投入與負債結構＋公司自身歷史趨勢；門檻為可調整 MVP 參數",
+  "rules": [
+    {
+      "rule_id": "PACKAGING_WORKING_CAPITAL_001",
+      "name": "存貨、現金流與負債同步壓力",
+      "category": "封裝測試營運資金",
+      "rule_scope": "packaging_testing",
+      "operator": "packaging_working_capital_pressure",
+      "logic_expression": "inventory_growth_yoy - revenue_growth_yoy >= inventory_gap AND operating_cash_flow_change_percent < 0 AND debt_ratio_change_pp >= debt_change",
+      "thresholds": {
+        "attention_inventory_gap": 15.0,
+        "high_inventory_gap": 30.0,
+        "attention_debt_change": 5.0,
+        "high_debt_change": 10.0
+      },
+      "metrics": ["inventory_growth_yoy", "revenue_growth_yoy", "operating_cash_flow", "debt_ratio"],
+      "rationale": "封裝測試需同時觀察存貨去化、營業現金流與資金結構；只有三者同步惡化時才提高關注。"
+    }
+  ]
+}
