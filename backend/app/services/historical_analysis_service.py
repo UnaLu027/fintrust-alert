@@ -19,7 +19,7 @@ class HistoricalFinancialAnalysisService:
         rule_engine: HistoricalFinancialRuleEngine | None = None,
     ) -> None:
         self.mops_client = mops_client or MopsInlineXbrlClient()
-        self.rule_engine = rule_engine or HistoricalFinancialRuleEngine()
+        self.rule_engine = rule_engine
 
     @staticmethod
     def _overall_severity(rule_results) -> RuleSeverity:
@@ -72,14 +72,18 @@ class HistoricalFinancialAnalysisService:
         )
         available = [period for period in periods if period.status == "available"]
         metrics = calculate_historical_metrics(periods)
-        rule_results = self.rule_engine.evaluate(periods, metrics)
+        rule_engine = self.rule_engine or HistoricalFinancialRuleEngine(
+            subindustry=profile.subindustry
+        )
+        rule_results = rule_engine.evaluate(periods, metrics)
         overall = self._overall_severity(rule_results)
 
         failed_periods = [period for period in periods if period.status != "available"]
         limitations = [
             "第一版只使用 MOPS 第 4 季／年度合併財報，避免把第二、三季累計數誤當成單季數值。",
             "MOPS iXBRL taxonomy 與公司自訂概念可能跨年度變動；無法可靠映射的欄位會標為資料不足。",
-            "規則門檻是可調整的 MVP 預設值，尚未完成同子產業中位數與 MAD 校準。",
+            "系統依公司 registry 的半導體子產業載入共通規則與子產業複合規則。",
+            "規則門檻是可調整的 MVP 預設值，後續仍需使用同子產業中位數與 MAD 校準。",
             "歷史規則結果只提供財務趨勢與風險提示，不構成投資建議或最終企業評價。",
         ]
         if failed_periods:
@@ -99,8 +103,8 @@ class HistoricalFinancialAnalysisService:
             start_year=min(years_present) if years_present else None,
             end_year=max(years_present) if years_present else None,
             analyzed_at=datetime.now(timezone.utc),
-            rule_version=self.rule_engine.version,
-            threshold_basis=self.rule_engine.threshold_basis,
+            rule_version=rule_engine.version,
+            threshold_basis=rule_engine.threshold_basis,
             overall_severity=overall,
             summary=self._summary(profile.name, len(available), rule_results, overall),
             periods=periods,
