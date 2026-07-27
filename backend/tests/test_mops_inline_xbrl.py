@@ -131,6 +131,7 @@ def test_fetch_history_keeps_error_period_but_collects_requested_available_years
         xbrl_client=xbrl_client,
         parser=FakeParser(),
         require_arelle=False,
+        cache_enabled=False,
     )
 
     periods = asyncio.run(client.fetch_history(tsmc, years=3, end_roc_year=114))
@@ -143,3 +144,21 @@ def test_fetch_history_keeps_error_period_but_collects_requested_available_years
     assert {period.period for period in available} == {"2022FY", "2023FY", "2024FY"}
     assert len(xbrl_client.calls) == 4
     assert all(call[3] == "C" for call in xbrl_client.calls)
+
+
+def test_fetch_annual_reuses_raw_ixbrl_cache(tsmc, tmp_path):
+    xbrl_client = FakeXbrlClient()
+    client = MopsInlineXbrlClient(
+        xbrl_client=xbrl_client,
+        parser=FakeParser(),
+        require_arelle=False,
+        cache_dir=tmp_path,
+        cache_ttl_hours=24,
+    )
+
+    first = asyncio.run(client.fetch_annual(tsmc, 113))
+    second = asyncio.run(client.fetch_annual(tsmc, 113))
+
+    assert first.revenue == second.revenue
+    assert len(xbrl_client.calls) == 1
+    assert (tmp_path / "2330_113_Q4_C.ixbrl").exists()
