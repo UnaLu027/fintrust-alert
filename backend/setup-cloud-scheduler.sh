@@ -6,6 +6,7 @@ REGION="${REGION:-asia-east1}"
 SCHEDULER_SA_NAME="${SCHEDULER_SA_NAME:-fintrust-alert-scheduler}"
 SCHEDULER_SA_EMAIL="${SCHEDULER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 TOKEN_FILE="${TOKEN_FILE:-.ingestion-token}"
+RUN_INITIAL_REFRESH="${RUN_INITIAL_REFRESH:-true}"
 
 if [[ $# -ne 1 ]]; then
   echo "用法：bash setup-cloud-scheduler.sh <CLOUD_RUN_URL>" >&2
@@ -31,8 +32,6 @@ if ! gcloud iam service-accounts describe "${SCHEDULER_SA_EMAIL}" >/dev/null 2>&
     --display-name="FinTrust Alert Cloud Scheduler"
 fi
 
-# The service is public for the web frontend, while the ingestion endpoint also
-# validates X-Ingestion-Token. OIDC is still attached for auditable service identity.
 gcloud run services add-iam-policy-binding fintrust-alert-api \
   --region "${REGION}" \
   --member="serviceAccount:${SCHEDULER_SA_EMAIL}" \
@@ -71,7 +70,6 @@ create_or_update_job() {
   fi
 }
 
-# Stagger requests to reduce load on MOPS and isolate retries by company.
 create_or_update_job "2330" "10 6 * * *"
 create_or_update_job "2303" "20 6 * * *"
 create_or_update_job "2454" "30 6 * * *"
@@ -79,4 +77,13 @@ create_or_update_job "3711" "40 6 * * *"
 
 echo
 echo "Cloud Scheduler 已建立：每天 Asia/Taipei 06:10–06:40 依序更新四家公司。"
-echo "可手動測試：gcloud scheduler jobs run fintrust-refresh-2330 --location ${REGION}"
+
+if [[ "${RUN_INITIAL_REFRESH}" == "true" ]]; then
+  echo "啟動首次資料建立；Scheduler jobs 會在背景依序送出請求。"
+  for ticker in 2330 2303 2454 3711; do
+    gcloud scheduler jobs run "fintrust-refresh-${ticker}" --location "${REGION}"
+  done
+  echo "首次分析執行中。可到 Cloud Run Logs 或 Firestore 查看進度。"
+else
+  echo "略過首次 refresh。可手動執行：gcloud scheduler jobs run fintrust-refresh-2330 --location ${REGION}"
+fi
