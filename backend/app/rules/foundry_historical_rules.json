@@ -1,0 +1,23 @@
+{
+  "version": "foundry-history-0.1.0",
+  "subindustry": "晶圓代工",
+  "threshold_basis": "晶圓代工資本密集特性＋公司自身歷史中位數；門檻為可調整 MVP 參數",
+  "rules": [
+    {
+      "rule_id": "FOUNDRY_CAPEX_MARGIN_001",
+      "name": "擴產、自由現金流與毛利率壓力",
+      "category": "晶圓代工資本投入",
+      "rule_scope": "foundry",
+      "operator": "foundry_capex_margin_pressure",
+      "logic_expression": "capex_intensity > historical_median + gap AND free_cash_flow < 0 AND gross_margin_change_pp <= margin_drop",
+      "thresholds": {
+        "attention_capex_gap": 8.0,
+        "high_capex_gap": 15.0,
+        "attention_margin_drop": -2.0,
+        "high_margin_drop": -4.0
+      },
+      "metrics": ["capex_intensity", "free_cash_flow", "gross_margin"],
+      "rationale": "晶圓代工高資本支出本身不是負面；只有當投入明顯高於公司歷史基準，同時自由現金流為負且毛利率下滑時，才提高關注。"
+    }
+  ]
+}
