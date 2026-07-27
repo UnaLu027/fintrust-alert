@@ -1,10 +1,16 @@
 # Firebase Hosting (`web.app`) 與 Cloud Run 串接指南
 
-本文件對應 `feature/financial-statement-ai-mvp`。部署完成後的架構為：
+本文件對應 `feature/financial-statement-ai-mvp`，目前已綁定 Firebase Project ID：
+
+```text
+fintrust-alert
+```
+
+部署完成後的架構為：
 
 ```text
 Firebase Hosting
-https://<PROJECT_ID>.web.app
+https://fintrust-alert.web.app
         │
         └── VITE_FINANCIAL_API_BASE_URL
                     ↓
@@ -19,75 +25,75 @@ https://fintrust-alert-api-....run.app
 
 ## 已在程式庫準備好的檔案
 
+- `.firebaserc`：已綁定 `fintrust-alert`。
 - `firebase.json`：Vite `dist` 部署、React Router SPA rewrite、靜態資源快取。
 - `backend/Dockerfile`：Python 3.12 Cloud Run 容器。
 - `backend/.dockerignore`、`backend/.gcloudignore`：縮小部署內容。
-- `backend/cloudrun.env.yaml.example`：Cloud Run 環境變數範本。
+- `backend/cloudrun.env.yaml.example`：已填入 `fintrust-alert.web.app` 與 `fintrust-alert.firebaseapp.com`。
+- `backend/deploy-cloud-run.sh`：Cloud Shell 一鍵部署腳本。
 - `.env.production.example`：前端 Cloud Run URL 範本。
 
-## 一、建立 Firebase／Google Cloud 專案
+## 一、確認 Firebase／Google Cloud 專案
 
-1. 在 Firebase Console 建立專案。
-2. 專案 ID 會決定網址：`https://<PROJECT_ID>.web.app`。專案名稱與專案 ID 不一定相同，請記錄「專案 ID」。
-3. 在同一專案連結 Cloud Billing。Cloud Run 與 Cloud Build 部署前通常需要啟用計費帳戶。
-4. 建議在 Google Cloud Billing 建立預算通知。
-
-下文以此代稱：
+目前固定使用：
 
 ```text
-PROJECT_ID=<你的 Firebase 專案 ID>
+PROJECT_ID=fintrust-alert
 REGION=asia-east1
 SERVICE=fintrust-alert-api
 ```
 
+預計前端網址：
+
+```text
+https://fintrust-alert.web.app
+https://fintrust-alert.firebaseapp.com
+```
+
+部署 Cloud Run 前，必須在同一個 Firebase／Google Cloud 專案連結 Cloud Billing，並建議建立預算通知。
+
 ## 二、部署 FastAPI 到 Cloud Run
 
-可以在 Windows 的 Google Cloud CLI 或 Google Cloud Shell 執行。
+建議直接使用瀏覽器中的 Google Cloud Shell，不必先在 Windows 安裝 Google Cloud CLI。
 
-### 1. 取得 feature branch
+### 1. 開啟 Cloud Shell
+
+登入 Google Cloud Console，右上角點擊終端機圖示「啟用 Cloud Shell」。
+
+先確認目前專案：
+
+```bash
+gcloud config get-value project
+```
+
+若不是 `fintrust-alert`，執行：
+
+```bash
+gcloud config set project fintrust-alert
+```
+
+### 2. 取得 feature branch
 
 ```bash
 git clone --branch feature/financial-statement-ai-mvp --single-branch https://github.com/UnaLu027/fintrust-alert.git
 cd fintrust-alert/backend
 ```
 
-### 2. 登入並選擇專案
+### 3. 執行部署腳本
 
 ```bash
-gcloud auth login
-gcloud config set project YOUR_FIREBASE_PROJECT_ID
+bash deploy-cloud-run.sh
 ```
 
-在 Cloud Shell 中通常已登入，但仍要確認專案：
+腳本會自動：
 
-```bash
-gcloud config get-value project
-```
+1. 選擇 `fintrust-alert` 專案。
+2. 啟用 Cloud Run、Cloud Build、Artifact Registry API。
+3. 複製 `cloudrun.env.yaml.example` 為 `cloudrun.env.yaml`。
+4. 使用 `backend/Dockerfile` 建置並部署。
+5. 設定 300 秒逾時、2 GiB 記憶體與最多 3 個 instances。
 
-### 3. 啟用部署所需 API
-
-```bash
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
-```
-
-### 4. 建立正式環境變數檔
-
-```bash
-cp cloudrun.env.yaml.example cloudrun.env.yaml
-```
-
-將 `cloudrun.env.yaml` 的 `YOUR_FIREBASE_PROJECT_ID` 改成真正的專案 ID：
-
-```yaml
-CORS_ALLOW_ORIGINS: "https://YOUR_PROJECT_ID.web.app,https://YOUR_PROJECT_ID.firebaseapp.com"
-MOPS_XBRL_CACHE_DIR: "/tmp/fintrust/mops_ixbrl_cache"
-MOPS_XBRL_CACHE_TTL_HOURS: "24"
-FINANCIAL_DATABASE_PATH: "/tmp/fintrust/financial_facts.sqlite3"
-```
-
-`cloudrun.env.yaml` 不要提交到 GitHub。
-
-### 5. 從 `backend/` 部署
+等同的完整指令為：
 
 ```bash
 gcloud run deploy fintrust-alert-api \
@@ -101,15 +107,13 @@ gcloud run deploy fintrust-alert-api \
   --env-vars-file cloudrun.env.yaml
 ```
 
-Cloud Run 會讀取 `backend/Dockerfile`，建置映像並部署服務。
-
 完成後記錄輸出的 Service URL，例如：
 
 ```text
 https://fintrust-alert-api-xxxxxxxxxx-de.a.run.app
 ```
 
-### 6. 後端驗收
+### 4. 後端驗收
 
 依序打開：
 
@@ -125,7 +129,7 @@ https://fintrust-alert-api-xxxxxxxxxx-de.a.run.app
 
 ## 三、建置並部署 Firebase Hosting
 
-回到專案根目錄：
+Cloud Run 驗收成功後，在同一個 Cloud Shell 執行：
 
 ```bash
 cd ..
@@ -137,65 +141,65 @@ cd ..
 cp .env.production.example .env.production.local
 ```
 
-將內容改成剛剛取得的 Cloud Run URL，最後不要加 `/`：
+編輯：
+
+```bash
+nano .env.production.local
+```
+
+填入剛剛取得的 Cloud Run URL，最後不要加 `/`：
 
 ```text
 VITE_FINANCIAL_API_BASE_URL=https://fintrust-alert-api-xxxxxxxxxx-de.a.run.app
 ```
 
-`.env.production.local` 已符合 `.gitignore` 的 `*.local` 規則，不會提交到 GitHub。
+儲存方式：
 
-### 2. 安裝並建置
-
-```bash
-npm ci
-npm run build
+```text
+Ctrl + O
+Enter
+Ctrl + X
 ```
 
-建置完成後應產生 `dist/`。
+`.env.production.local` 符合 `.gitignore` 的 `*.local` 規則，不會提交到 GitHub。
 
-### 3. 登入 Firebase CLI
-
-```bash
-npx firebase-tools login
-```
-
-在 Cloud Shell 無法自動開瀏覽器時：
+### 2. 登入 Firebase CLI
 
 ```bash
 npx firebase-tools login --no-localhost
 ```
 
-### 4. 綁定 Firebase 專案
+Cloud Shell 會顯示登入網址；開啟網址、允許權限，再把驗證碼貼回終端機。
+
+### 3. 建置並部署 Hosting
+
+由於 `.firebaserc` 已綁定 `fintrust-alert`，不需要再執行 `firebase use --add`。
+
+執行：
 
 ```bash
-npx firebase-tools use --add
+npm ci
+npm run deploy:hosting
 ```
 
-從清單選擇同一個 Firebase 專案，並將 alias 設為：
+`deploy:hosting` 會自動：
 
 ```text
-default
-```
-
-這一步會建立 `.firebaserc`。確認內容中的 project ID 正確後再提交；在尚未確認專案 ID 前不要手動猜測。
-
-### 5. 部署 Hosting
-
-```bash
-npx firebase-tools deploy --only hosting
+npm run build
+→ 產生 dist/
+→ 部署到 Firebase Hosting
 ```
 
 完成後應取得：
 
 ```text
-https://YOUR_PROJECT_ID.web.app
-https://YOUR_PROJECT_ID.firebaseapp.com
+https://fintrust-alert.web.app
+https://fintrust-alert.firebaseapp.com
 ```
 
 ## 四、前後端完整驗收
 
-1. 打開 `https://YOUR_PROJECT_ID.web.app`。
+1. 打開 `https://fintrust-alert.web.app`。
 2. 登入後進入「財報規則引擎」。
 3. 選擇台積電 2330。
 4. 先按「分析 TWSE 最新資料」。
@@ -205,28 +209,35 @@ https://YOUR_PROJECT_ID.firebaseapp.com
 
 ## 五、常見問題
 
-### 網頁顯示缺少 `VITE_FINANCIAL_API_BASE_URL`
+### Cloud Run 顯示沒有 Billing
 
-代表 production build 前沒有建立 `.env.production.local`，或建立後沒有重新執行：
+必須先在 `fintrust-alert` 專案連結 Cloud Billing，再重新執行：
 
 ```bash
-npm run build
-npx firebase-tools deploy --only hosting
+bash deploy-cloud-run.sh
+```
+
+### 網頁顯示缺少 `VITE_FINANCIAL_API_BASE_URL`
+
+代表 production build 前沒有建立 `.env.production.local`，或建立後沒有重新建置部署：
+
+```bash
+npm run deploy:hosting
 ```
 
 ### 瀏覽器出現 CORS 錯誤
 
-確認 Cloud Run 的 `CORS_ALLOW_ORIGINS` 與實際 Hosting 網址完全一致，網址末尾不要加 `/`。更新方式：
+目前範本已設定：
 
-```bash
-gcloud run services update fintrust-alert-api \
-  --region asia-east1 \
-  --env-vars-file backend/cloudrun.env.yaml
+```text
+https://fintrust-alert.web.app
+https://fintrust-alert.firebaseapp.com
 ```
 
-若目前位於 `backend/`，改用：
+更新 Cloud Run 環境變數：
 
 ```bash
+cd backend
 gcloud run services update fintrust-alert-api \
   --region asia-east1 \
   --env-vars-file cloudrun.env.yaml
@@ -243,6 +254,5 @@ gcloud run services update fintrust-alert-api \
 ## 六、目前不做的事情
 
 - 不先把 API rewrite 到 `web.app/api/**`。
-- 不在尚未取得 Firebase project ID 前建立假的 `.firebaserc`。
 - 不把 `.env.production.local` 或 `cloudrun.env.yaml` 提交到 GitHub。
 - 不合併 Draft PR 到 `master`，直到線上四家公司皆完成驗收。
