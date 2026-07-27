@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -94,12 +95,11 @@ class FakeFetcher:
         return SimpleNamespace(items=by_type[statement_type])
 
 
-@pytest.mark.asyncio
-async def test_fetch_history_keeps_error_period_but_collects_requested_available_years(tsmc):
+def test_fetch_history_keeps_error_period_but_collects_requested_available_years(tsmc):
     fetcher = FakeFetcher()
     client = MopsInlineXbrlClient(fetcher=fetcher)
 
-    periods = await client.fetch_history(tsmc, years=3, end_roc_year=114)
+    periods = asyncio.run(client.fetch_history(tsmc, years=3, end_roc_year=114))
 
     available = [period for period in periods if period.status == "available"]
     errors = [period for period in periods if period.status == "error"]
