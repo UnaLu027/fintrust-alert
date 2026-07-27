@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import date, datetime, timezone
+from typing import Any
 
 from app.historical_analysis_models import HistoricalPeriodRecord
 from app.models import CompanyProfile
 
 try:
-    from twmops import FinancialFetcher
-    from twmops.fetchers.financial import FinancialFetcherError
+    from twmops.clients.xbrl_client import MOPSXBRLClient, MOPSXBRLClientError
+    from twmops.parsers.arelle import check_arelle_available
+    from twmops.parsers.xbrl_parser import XBRLParser, XBRLParserError
+    from twmops.utils.numerics import parse_financial_value
 except ImportError:  # pragma: no cover - deployment dependency guard
-    FinancialFetcher = None  # type: ignore[assignment]
+    MOPSXBRLClient = None  # type: ignore[assignment]
+    XBRLParser = None  # type: ignore[assignment]
 
-    class FinancialFetcherError(Exception):
+    class MOPSXBRLClientError(Exception):
         pass
+
+    class XBRLParserError(Exception):
+        pass
+
+    def check_arelle_available() -> bool:
+        return False
+
+    def parse_financial_value(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
 
 class MopsInlineXbrlError(RuntimeError):
@@ -23,7 +38,7 @@ class MopsInlineXbrlError(RuntimeError):
 
 MOPS_DOWNLOAD_TEMPLATE = (
     "https://mopsov.twse.com.tw/server-java/FileDownLoad"
-    "?functionName=t164sb01&step=9&co_id={ticker}&year={roc_year}"
+    "?functionName=t164sb01&step=9&co_id={ticker}&year={fiscal_year}"
     "&season=4&report_id=C"
 )
 
@@ -100,7 +115,15 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-STATEMENT_TYPES = ("income_statement", "balance_sheet", "cash_flow")
+INSTANT_FIELDS = {
+    "cash_and_cash_equivalents",
+    "inventory",
+    "current_assets",
+    "total_assets",
+    "current_liabilities",
+    "total_liabilities",
+    "equity",
+}
 
 
 def _normalized_token(value: Any) -> str:
@@ -108,7 +131,7 @@ def _normalized_token(value: Any) -> str:
     return re.sub(r"[\s\-_:：()（）,.，、/\\]", "", text)
 
 
-def _item_value(item: Any, name: str) -> Any:
+def _object_value(item: Any, name: str) -> Any:
     if isinstance(item, dict):
         return item.get(name)
     return getattr(item, name, None)
@@ -129,45 +152,96 @@ def _match_score(concept: str, label: str, alias: str) -> int:
     return 0
 
 
-def _extract_value(items: Iterable[Any], aliases: tuple[str, ...]) -> tuple[float | None, str | None]:
-    best: tuple[int, float, str] | None = None
-    for item in items:
-        raw_value = _item_value(item, "value")
-        if raw_value is None:
+def _parse_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    match = re.search(r"\d{4}-\d{2}-\d{2}", str(value))
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group())
+    except ValueError:
+        return None
+
+
+def _context_is_current_annual(context: Any, fiscal_year: int, instant: bool) -> bool:
+    target_end = date(fiscal_year, 12, 31)
+    arelle_exclusive_end = date(fiscal_year + 1, 1, 1)
+
+    if instant:
+        instant_date = _parse_date(_object_value(context, "instant"))
+        return instant_date in {target_end, arelle_exclusive_end}
+
+    start_date = _parse_date(_object_value(context, "period_start"))
+    end_date = _parse_date(_object_value(context, "period_end"))
+    if start_date is None or end_date not in {target_end, arelle_exclusive_end}:
+        return False
+    return start_date in {date(fiscal_year, 1, 1), date(fiscal_year - 1, 12, 31)}
+
+
+def _extract_package_value(
+    package: Any,
+    aliases: tuple[str, ...],
+    *,
+    fiscal_year: int,
+    instant: bool,
+) -> tuple[float | None, str | None]:
+    contexts = _object_value(package, "contexts") or {}
+    labels = _object_value(package, "labels") or {}
+    facts = _object_value(package, "facts") or []
+    best: tuple[int, int, float, str] | None = None
+
+    for fact in facts:
+        context_ref = str(_object_value(fact, "context_ref") or "")
+        context = contexts.get(context_ref) if isinstance(contexts, dict) else None
+        if context is None or not _context_is_current_annual(context, fiscal_year, instant):
             continue
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
+
+        concept = str(_object_value(fact, "concept") or "")
+        label = str(labels.get(concept, concept)) if isinstance(labels, dict) else concept
+        alias_score = max(
+            (_match_score(concept, label, alias) for alias in aliases),
+            default=0,
+        )
+        if alias_score == 0:
             continue
-        concept = str(_item_value(item, "type") or "")
-        label = str(_item_value(item, "origin_name") or "")
-        score = max((_match_score(concept, label, alias) for alias in aliases), default=0)
-        if score == 0:
+
+        value = parse_financial_value(_object_value(fact, "value"))
+        if value is None:
             continue
-        match_name = label or concept
-        if best is None or score > best[0]:
-            best = (score, value, match_name)
+
+        # Prefer exact label/concept matches and shorter context ids. In MOPS
+        # consolidated filings, the shortest matching current-period context is
+        # normally the non-dimensional total rather than a segment breakdown.
+        candidate = (alias_score, -len(context_ref), float(value), label or concept)
+        if best is None or candidate[:2] > best[:2]:
+            best = candidate
+
     if best is None:
         return None, None
-    return best[1], best[2]
+    return best[2], best[3]
 
 
-def normalize_mops_annual_statement(
+def normalize_mops_annual_package(
     profile: CompanyProfile,
     roc_year: int,
-    items: Iterable[Any],
+    package: Any,
     *,
     source_url: str | None = None,
-    warnings: list[str] | None = None,
 ) -> HistoricalPeriodRecord:
-    item_list = list(items)
+    fiscal_year = roc_year + 1911
     values: dict[str, float | None] = {}
     concept_matches: dict[str, str] = {}
     found: list[str] = []
     missing: list[str] = []
 
     for canonical, aliases in FIELD_ALIASES.items():
-        value, matched_name = _extract_value(item_list, aliases)
+        value, matched_name = _extract_package_value(
+            package,
+            aliases,
+            fiscal_year=fiscal_year,
+            instant=canonical in INSTANT_FIELDS,
+        )
         values[canonical] = value
         if value is None:
             missing.append(canonical)
@@ -176,13 +250,17 @@ def normalize_mops_annual_statement(
             if matched_name:
                 concept_matches[canonical] = matched_name
 
-    fiscal_year = roc_year + 1911
-    record_warnings = list(warnings or [])
-    core_found = sum(values[field] is not None for field in ("revenue", "total_assets", "net_income"))
+    warnings: list[str] = []
+    if not (_object_value(package, "contexts") or {}):
+        warnings.append("iXBRL 文件未解析出 context，系統不會使用未確認期間的數值。")
+
+    core_found = sum(
+        values[field] is not None for field in ("revenue", "total_assets", "net_income")
+    )
     status = "available" if core_found >= 2 else "missing"
     if status == "missing":
-        record_warnings.append(
-            "MOPS iXBRL 已下載，但核心財報欄位不足，可能是 taxonomy mapping 尚未涵蓋該年度概念。"
+        warnings.append(
+            "MOPS iXBRL 已下載，但目前年度的核心欄位不足；可能是 taxonomy mapping 或 context 尚未涵蓋。"
         )
 
     return HistoricalPeriodRecord(
@@ -193,61 +271,60 @@ def normalize_mops_annual_statement(
         roc_year=roc_year,
         period=f"{fiscal_year}FY",
         source_url=source_url
-        or MOPS_DOWNLOAD_TEMPLATE.format(ticker=profile.ticker, roc_year=roc_year),
+        or MOPS_DOWNLOAD_TEMPLATE.format(
+            ticker=profile.ticker,
+            fiscal_year=fiscal_year,
+        ),
         status=status,
         fields_found=found,
         fields_missing=missing,
         concept_matches=concept_matches,
-        warnings=record_warnings,
+        warnings=warnings,
         **values,
     )
 
 
 class MopsInlineXbrlClient:
-    """Fetch annual consolidated Inline XBRL filings from MOPS.
+    """Download one consolidated annual iXBRL package per year and select facts
+    using the current annual context.
 
-    The first integration deliberately uses Q4/annual filings only. This avoids
-    treating year-to-date Q2/Q3 values as standalone quarterly performance.
+    Only Q4/annual filings are used in the first integration, preventing
+    year-to-date Q2/Q3 values from being presented as standalone quarters.
     """
 
-    def __init__(self, fetcher: Any | None = None) -> None:
-        if fetcher is not None:
-            self.fetcher = fetcher
-        elif FinancialFetcher is None:
+    def __init__(
+        self,
+        *,
+        xbrl_client: Any | None = None,
+        parser: Any | None = None,
+        require_arelle: bool = True,
+    ) -> None:
+        if MOPSXBRLClient is None or XBRLParser is None:
             raise MopsInlineXbrlError(
                 "缺少 twmops 套件；請重新安裝 backend/requirements.txt。"
             )
-        else:
-            self.fetcher = FinancialFetcher()
+        if require_arelle and parser is None and not check_arelle_available():
+            raise MopsInlineXbrlError(
+                "缺少 Arelle；請安裝 twmops[xbrl]，避免 iXBRL scale 或 taxonomy 解析不完整。"
+            )
+        self.xbrl_client = xbrl_client or MOPSXBRLClient()
+        self.parser = parser or XBRLParser()
 
     async def fetch_annual(self, profile: CompanyProfile, roc_year: int) -> HistoricalPeriodRecord:
-        combined_items: list[Any] = []
-        warnings: list[str] = []
+        try:
+            content = await self.xbrl_client.download_xbrl_async(
+                profile.ticker,
+                roc_year,
+                4,
+                report_type="C",
+            )
+            package = self.parser.parse(content, profile.ticker, roc_year, 4)
+        except (MOPSXBRLClientError, XBRLParserError) as exc:
+            raise MopsInlineXbrlError(str(exc)) from exc
+        except Exception as exc:
+            raise MopsInlineXbrlError(f"MOPS iXBRL 下載或解析失敗：{exc}") from exc
 
-        for statement_type in STATEMENT_TYPES:
-            try:
-                statement = await self.fetcher.get_simplified_statement_async(
-                    stock_id=profile.ticker,
-                    year=roc_year,
-                    quarter=4,
-                    statement_type=statement_type,
-                )
-                combined_items.extend(getattr(statement, "items", []))
-            except FinancialFetcherError as exc:
-                warnings.append(f"{statement_type} 取得失敗：{exc}")
-            except Exception as exc:
-                warnings.append(f"{statement_type} 下載或解析失敗：{exc}")
-
-        if not combined_items:
-            detail = "；".join(warnings) or "查無可解析的財報項目"
-            raise MopsInlineXbrlError(detail)
-
-        return normalize_mops_annual_statement(
-            profile,
-            roc_year,
-            combined_items,
-            warnings=warnings,
-        )
+        return normalize_mops_annual_package(profile, roc_year, package)
 
     async def fetch_history(
         self,
@@ -273,8 +350,7 @@ class MopsInlineXbrlClient:
         ):
             attempts += 1
             try:
-                record = await self.fetch_annual(profile, candidate)
-                periods.append(record)
+                periods.append(await self.fetch_annual(profile, candidate))
             except MopsInlineXbrlError as exc:
                 fiscal_year = candidate + 1911
                 periods.append(
@@ -287,7 +363,7 @@ class MopsInlineXbrlClient:
                         period=f"{fiscal_year}FY",
                         source_url=MOPS_DOWNLOAD_TEMPLATE.format(
                             ticker=profile.ticker,
-                            roc_year=candidate,
+                            fiscal_year=fiscal_year,
                         ),
                         status="error",
                         warnings=[str(exc)],
