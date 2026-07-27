@@ -144,7 +144,7 @@ class FirestoreAnalysisRepository:
             filter=FieldFilter("ticker", "==", ticker)
         ).stream()
         rows = [document.to_dict() or {} for document in documents]
-        rows.sort(key=lambda row: row.get("created_at") or datetime.min, reverse=True)
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
         return rows[:limit]
 
     def list_runs(self, ticker: str, limit: int = 20) -> list[AnalysisRunSummary]:
@@ -154,5 +154,5 @@ class FirestoreAnalysisRepository:
             filter=FieldFilter("ticker", "==", ticker)
         ).stream()
         rows = [document.to_dict() or {} for document in documents]
-        rows.sort(key=lambda row: row.get("started_at") or datetime.min, reverse=True)
+        rows.sort(key=lambda row: str(row.get("started_at") or ""), reverse=True)
         return [AnalysisRunSummary.model_validate(row) for row in rows[:limit]]
