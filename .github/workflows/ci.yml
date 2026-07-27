@@ -45,3 +45,10 @@ jobs:
           name: backend-test-output
           path: backend/pytest-output.txt
           if-no-files-found: error
+
+  backend-container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Cloud Run container
+        run: docker build --tag fintrust-alert-api:ci backend
