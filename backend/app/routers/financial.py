@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_fact_repository
+from app.financial_analysis_models import (
+    FinancialStatementAnalysisReport,
+    RuleCatalogResponse,
+)
 from app.models import (
     ClaimExtractionRequest,
     ClaimVerificationRequest,
@@ -14,6 +18,12 @@ from app.models import (
 from app.services.claim_parser import extract_claim
 from app.services.company_registry import list_companies
 from app.services.fact_repository import FinancialFactRepository
+from app.services.financial_analysis_service import (
+    FinancialAnalysisService,
+    UnsupportedCompanyError,
+)
+from app.services.financial_rule_engine import FinancialRuleEngine
+from app.services.twse_openapi import TwseOpenApiError
 from app.services.verifier import verify_claim
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial-evidence"])
@@ -22,8 +32,10 @@ router = APIRouter(prefix="/api/v1/financial", tags=["financial-evidence"])
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(
-        module="semiconductor_financial_evidence_mvp",
-        method="claim_extraction_and_deterministic_recalculation",
+        module="semiconductor_financial_rule_engine_mvp",
+        method="live_twse_ingestion_and_versioned_deterministic_rules",
+        twse_openapi_ready=True,
+        rule_engine_ready=True,
         historical_xbrl_ready=False,
     )
 
@@ -34,9 +46,30 @@ def companies() -> CompanyListResponse:
         companies=list_companies(),
         note=(
             "此為可擴充的半導體公司 seed registry；系統不限定晶圓代工，"
-            "但未來同業比較只允許相同子產業。"
+            "同業基準功能只會比較相同子產業。"
         ),
     )
+
+
+@router.get("/rules", response_model=RuleCatalogResponse)
+def rules() -> RuleCatalogResponse:
+    return FinancialRuleEngine().catalog()
+
+
+@router.get(
+    "/statements/{ticker}/analyze",
+    response_model=FinancialStatementAnalysisReport,
+)
+async def analyze_financial_statement(ticker: str) -> FinancialStatementAnalysisReport:
+    try:
+        return await FinancialAnalysisService().analyze(ticker)
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TwseOpenApiError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"無法取得臺灣證券交易所財報資料：{exc}",
+        ) from exc
 
 
 @router.post("/claims/extract")
