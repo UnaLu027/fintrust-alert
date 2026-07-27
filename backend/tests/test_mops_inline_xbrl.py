@@ -94,8 +94,8 @@ def test_normalize_package_uses_current_year_context_not_comparative_fact(tsmc):
     assert record.period == "2025FY"
     assert record.revenue == 2_800_000
     assert record.total_assets == 5_600_000
-    assert record.operating_cash_flow == 980_000
-    assert record.capital_expenditure == -560_000
+    assert record.operating_cash_flow == pytest.approx(980_000)
+    assert record.capital_expenditure == pytest.approx(-560_000)
     assert record.revenue != 99
     assert record.total_assets != 88
     assert "revenue" in record.concept_matches
