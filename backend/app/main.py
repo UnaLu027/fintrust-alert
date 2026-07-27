@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -7,12 +8,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.financial import router as financial_router
 
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 app = FastAPI(
     title="FinTrust Alert Financial Rule Engine API",
-    version="0.2.0",
+    version="0.3.0",
     description=(
-        "半導體產業財報抓取、財務指標計算與版本化規則分析 MVP。"
-        "本服務不提供投資建議。"
+        "半導體產業官方財報自動抓取、持久化、財務指標計算、"
+        "子產業版本化規則分析與前端快照 API。本服務不提供投資建議。"
     ),
 )
 
@@ -40,8 +47,10 @@ app.include_router(financial_router)
 def root():
     return {
         "service": "FinTrust Alert Financial Rule Engine API",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "docs": "/docs",
-        "live_endpoint": "/api/v1/financial/statements/2330/analyze",
+        "scheduled_refresh_endpoint": "/api/v1/financial/admin/companies/2330/refresh",
+        "frontend_snapshot_endpoint": "/api/v1/financial/companies/2330/analysis/latest",
+        "persistence_backend": os.getenv("DATASTORE_BACKEND", "sqlite"),
         "disclaimer": "僅供財報分析與可信度風險提醒，非投資建議。",
     }
