@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import secrets
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from app.dependencies import get_fact_repository
+from app.dependencies import get_analysis_repository, get_fact_repository
 from app.financial_analysis_models import (
     FinancialStatementAnalysisReport,
     RuleCatalogResponse,
@@ -18,6 +21,13 @@ from app.models import (
     FactIngestRequest,
     HealthResponse,
 )
+from app.pipeline_models import (
+    AnalysisRunSummary,
+    CompanyRefreshResult,
+    FrontendAnalysisSnapshot,
+    RefreshAllResult,
+)
+from app.services.analysis_repository import AnalysisRepository
 from app.services.claim_parser import extract_claim
 from app.services.company_registry import list_companies
 from app.services.fact_repository import FinancialFactRepository
@@ -27,18 +37,36 @@ from app.services.financial_analysis_service import (
 )
 from app.services.financial_rule_engine import FinancialRuleEngine
 from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
+from app.services.ingestion_pipeline import FinancialIngestionPipeline
 from app.services.mops_inline_xbrl import MopsInlineXbrlError
 from app.services.twse_openapi import TwseOpenApiError
 from app.services.verifier import verify_claim
 
+
 router = APIRouter(prefix="/api/v1/financial", tags=["financial-evidence"])
+
+
+def require_ingestion_token(
+    x_ingestion_token: str | None = Header(default=None, alias="X-Ingestion-Token"),
+) -> None:
+    expected = os.getenv("INGESTION_API_TOKEN", "").strip()
+    production = os.getenv("APP_ENV", "development").strip().lower() == "production"
+    if not expected:
+        if production:
+            raise HTTPException(
+                status_code=503,
+                detail="Production ingestion endpoint requires INGESTION_API_TOKEN.",
+            )
+        return
+    if x_ingestion_token is None or not secrets.compare_digest(x_ingestion_token, expected):
+        raise HTTPException(status_code=401, detail="Invalid ingestion token.")
 
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(
         module="semiconductor_financial_rule_engine_mvp",
-        method="live_twse_snapshot_plus_mops_ixbrl_history_and_versioned_rules",
+        method="scheduled_ingestion_plus_persistent_analysis_snapshots",
         twse_openapi_ready=True,
         rule_engine_ready=True,
         historical_xbrl_ready=True,
@@ -50,8 +78,8 @@ def companies() -> CompanyListResponse:
     return CompanyListResponse(
         companies=list_companies(),
         note=(
-            "此為可擴充的半導體公司 seed registry；系統不限定晶圓代工，"
-            "同業基準功能只會比較相同子產業。"
+            "此為可擴充的半導體公司 seed registry；系統依晶圓代工、IC 設計、"
+            "封裝測試載入共通規則與子產業複合規則。"
         ),
     )
 
@@ -109,6 +137,85 @@ async def analyze_historical_financial_statements(
         ) from exc
 
 
+@router.post(
+    "/admin/companies/{ticker}/refresh",
+    response_model=CompanyRefreshResult,
+    dependencies=[Depends(require_ingestion_token)],
+)
+async def refresh_company_pipeline(
+    ticker: str,
+    years: int = Query(default=5, ge=3, le=5),
+    end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    trigger: Literal["scheduler", "manual", "demo", "startup"] = Query(default="manual"),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> CompanyRefreshResult:
+    result = await FinancialIngestionPipeline(repository=repository).refresh_company(
+        ticker,
+        years=years,
+        end_year=end_year,
+        trigger=trigger,
+    )
+    if result.status == "failed":
+        raise HTTPException(status_code=502, detail=result.error or "Financial refresh failed.")
+    return result
+
+
+@router.post(
+    "/admin/refresh-all",
+    response_model=RefreshAllResult,
+    dependencies=[Depends(require_ingestion_token)],
+)
+async def refresh_all_company_pipelines(
+    years: int = Query(default=5, ge=3, le=5),
+    end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    trigger: Literal["scheduler", "manual", "demo", "startup"] = Query(default="scheduler"),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> RefreshAllResult:
+    return await FinancialIngestionPipeline(repository=repository).refresh_all(
+        years=years,
+        end_year=end_year,
+        trigger=trigger,
+    )
+
+
+@router.get(
+    "/companies/{ticker}/analysis/latest",
+    response_model=FrontendAnalysisSnapshot,
+)
+def latest_persisted_analysis(
+    ticker: str,
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> FrontendAnalysisSnapshot:
+    snapshot = repository.get_latest_snapshot(ticker)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail="尚無已完成的分析快照；請等待排程或由管理端執行 refresh。",
+        )
+    return snapshot
+
+
+@router.get("/companies/{ticker}/metrics")
+def persisted_metrics(
+    ticker: str,
+    limit: int = Query(default=200, ge=1, le=1000),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+):
+    return {"ticker": ticker, "metrics": repository.list_metrics(ticker, limit)}
+
+
+@router.get(
+    "/companies/{ticker}/analysis-runs",
+    response_model=list[AnalysisRunSummary],
+)
+def analysis_runs(
+    ticker: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> list[AnalysisRunSummary]:
+    return repository.list_runs(ticker, limit)
+
+
 @router.post("/claims/extract")
 def extract(payload: ClaimExtractionRequest):
     return extract_claim(
@@ -142,7 +249,8 @@ def ingest(
     return {
         "inserted": inserted,
         "warning": (
-            "MVP endpoint accepts normalized facts only. The MOPS Inline XBRL "
-            "downloader/parser must preserve source URL, taxonomy concept, period, unit and scope."
+            "Compatibility endpoint only. Normal operation uses the scheduled ingestion pipeline, "
+            "which fetches official data, persists facts, calculates metrics, executes rules and "
+            "updates the frontend snapshot automatically."
         ),
     }
