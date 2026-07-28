@@ -11,6 +11,25 @@ from app.models import (
 from app.services.analysis_repository import AnalysisRepository
 
 
+MONEY_SCALES = {
+    "元": 1.0,
+    "千": 1_000.0,
+    "仟": 1_000.0,
+    "千元": 1_000.0,
+    "仟元": 1_000.0,
+    "新台幣千元": 1_000.0,
+    "新台幣仟元": 1_000.0,
+    "萬": 10_000.0,
+    "萬元": 10_000.0,
+    "百萬": 1_000_000.0,
+    "百萬元": 1_000_000.0,
+    "億": 100_000_000.0,
+    "億元": 100_000_000.0,
+    "兆": 1_000_000_000_000.0,
+    "兆元": 1_000_000_000_000.0,
+}
+
+
 def _direction_matches(direction: ClaimDirection, calculated: float) -> bool:
     if direction in {ClaimDirection.INCREASE, ClaimDirection.HIGHER_THAN}:
         return calculated > 0
@@ -29,6 +48,23 @@ def _signed_expected(value: float | None, direction: ClaimDirection) -> float | 
     if direction in {ClaimDirection.INCREASE, ClaimDirection.HIGHER_THAN}:
         return abs(value)
     return value
+
+
+def _convert_claimed_value(
+    value: float,
+    claimed_unit: str | None,
+    official_unit: str,
+) -> float | None:
+    if claimed_unit in {None, official_unit}:
+        return value
+    # EPS claims usually say「元」while the official evidence unit is 元／股.
+    if claimed_unit == "元" and official_unit == "元／股":
+        return value
+    from_scale = MONEY_SCALES.get(claimed_unit)
+    to_scale = MONEY_SCALES.get(official_unit)
+    if from_scale is None or to_scale is None:
+        return None
+    return value * from_scale / to_scale
 
 
 def verify_claim(
@@ -75,6 +111,7 @@ def verify_claim(
     formula: str | None = None
     calculated: float | None = None
     expected: float | None = None
+    value_comparison = False
 
     if claim.comparison_kind in {ComparisonKind.YOY, ComparisonKind.QOQ}:
         if comparison is None or comparison.value == 0:
@@ -100,8 +137,17 @@ def verify_claim(
         expected = _signed_expected(claim.claimed_percentage_points, claim.direction)
         formula = f"{current.value:g} - {comparison.value:g} = {calculated:.2f} 個百分點"
     elif claim.claimed_value is not None:
+        converted = _convert_claimed_value(claim.claimed_value, claim.unit, current.unit)
+        if converted is None:
+            return ClaimVerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.INSUFFICIENT_EVIDENCE,
+                explanation="主張單位與官方資料單位無法可靠換算，系統不進行數值比較。",
+                limitations=[f"主張單位：{claim.unit or '未提供'}；官方單位：{current.unit}"],
+            )
         calculated = current.value
-        expected = claim.claimed_value
+        expected = converted
+        value_comparison = True
         formula = f"官方值 = {current.value:g} {current.unit}"
     elif claim.direction != ClaimDirection.UNSPECIFIED and comparison is not None:
         calculated = current.value - comparison.value
@@ -151,10 +197,18 @@ def verify_claim(
 
     assert calculated is not None
     difference = abs(calculated - expected)
-    if difference <= tolerance_percentage_points:
+    # Percentage changes and percentage-point claims use an absolute point
+    # tolerance.  Money/EPS values use the same input as a relative percentage,
+    # avoiding a meaningless fixed tolerance of two thousand dollars.
+    strict_tolerance = (
+        max(abs(calculated) * tolerance_percentage_points / 100.0, 1e-9)
+        if value_comparison and current.unit not in {"%", "百分點"}
+        else tolerance_percentage_points
+    )
+    if difference <= strict_tolerance:
         verdict = VerificationVerdict.SUPPORTED
         explanation = "重新計算結果落在設定的容許誤差內。"
-    elif difference <= tolerance_percentage_points * 2:
+    elif difference <= strict_tolerance * 2:
         verdict = VerificationVerdict.PARTIALLY_SUPPORTED
         explanation = "主張方向大致一致，但數值差異超過嚴格容許誤差。"
     else:
