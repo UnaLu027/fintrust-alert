@@ -7,6 +7,10 @@ on:
       - feature/financial-statement-ai-mvp
     paths:
       - .github/workflows/mops-smoke.yml
+      - backend/requirements.txt
+      - backend/app/services/mops_inline_xbrl.py
+      - backend/app/services/robust_mops_inline_xbrl.py
+      - backend/scripts/smoke_mops.py
 
 jobs:
   live-mops-smoke:
