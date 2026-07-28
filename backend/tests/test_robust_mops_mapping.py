@@ -58,6 +58,7 @@ def test_robust_mapper_uses_twmops_cash_flow_concept_and_english_extension_label
     record = robust_normalize_mops_annual_package(company, 113, package)
 
     assert record.status == "available"
+    assert record.currency_unit == "新台幣元"
     assert record.operating_cash_flow == pytest.approx(1_826_177_068)
     assert record.capital_expenditure == pytest.approx(-949_816_825)
     assert record.concept_matches["operating_cash_flow"] == "CashFlowsFromUsedInOperatingActivities"
