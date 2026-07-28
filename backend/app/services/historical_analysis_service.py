@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from app.financial_analysis_models import RuleSeverity
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
@@ -8,17 +9,17 @@ from app.services.company_registry import get_company
 from app.services.financial_analysis_service import UnsupportedCompanyError
 from app.services.historical_metrics import calculate_historical_metrics
 from app.services.historical_rule_engine import HistoricalFinancialRuleEngine
-from app.services.mops_inline_xbrl import MopsInlineXbrlClient
+from app.services.robust_mops_inline_xbrl import RobustMopsInlineXbrlClient
 
 
 class HistoricalFinancialAnalysisService:
     def __init__(
         self,
         *,
-        mops_client: MopsInlineXbrlClient | None = None,
+        mops_client: Any | None = None,
         rule_engine: HistoricalFinancialRuleEngine | None = None,
     ) -> None:
-        self.mops_client = mops_client or MopsInlineXbrlClient()
+        self.mops_client = mops_client or RobustMopsInlineXbrlClient()
         self.rule_engine = rule_engine
 
     @staticmethod
@@ -30,7 +31,10 @@ class HistoricalFinancialAnalysisService:
             return RuleSeverity.HIGH_ATTENTION
         if RuleSeverity.ATTENTION in severities:
             return RuleSeverity.ATTENTION
-        if severities == {RuleSeverity.INSUFFICIENT_DATA}:
+        # Partial rule coverage must not be hidden by otherwise normal or
+        # positive results.  This keeps the system conservative and
+        # explainable when a source field could not be mapped.
+        if RuleSeverity.INSUFFICIENT_DATA in severities:
             return RuleSeverity.INSUFFICIENT_DATA
         if RuleSeverity.POSITIVE in severities:
             return RuleSeverity.POSITIVE
@@ -79,6 +83,9 @@ class HistoricalFinancialAnalysisService:
         overall = self._overall_severity(rule_results)
 
         failed_periods = [period for period in periods if period.status != "available"]
+        missing_metric_codes = sorted(
+            metric.code for metric in metrics if not metric.period_values
+        )
         limitations = [
             "第一版只使用 MOPS 第 4 季／年度合併財報，避免把第二、三季累計數誤當成單季數值。",
             "MOPS iXBRL taxonomy 與公司自訂概念可能跨年度變動；無法可靠映射的欄位會標為資料不足。",
@@ -86,6 +93,11 @@ class HistoricalFinancialAnalysisService:
             "規則門檻是可調整的 MVP 預設值，後續仍需使用同子產業中位數與 MAD 校準。",
             "歷史規則結果只提供財務趨勢與風險提示，不構成投資建議或最終企業評價。",
         ]
+        if missing_metric_codes:
+            limitations.append(
+                "本次無法產生的歷史指標：" + "、".join(missing_metric_codes)
+                + "。依賴這些指標的規則保留為資料不足。"
+            )
         if failed_periods:
             limitations.append(
                 "部分年度無法完整取得或解析："
