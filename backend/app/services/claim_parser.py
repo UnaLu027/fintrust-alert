@@ -10,10 +10,25 @@ from app.models import (
 from app.services.company_registry import find_company
 from app.services.periods import normalize_period, previous_quarter, previous_year_same_period
 
+
+# Put more specific expressions before generic ones so, for example, 自由現金流
+# is not consumed by the 營業現金流 pattern.
 METRIC_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("capex_intensity", re.compile(r"資本支出(?:占營收)?比(?:率)?|資本支出強度")),
+    ("rd_intensity", re.compile(r"研發(?:費用)?占營收比(?:率)?|研發強度")),
+    ("cash_conversion_ratio", re.compile(r"現金轉換比|營業現金流(?:／|/|除以)淨利")),
+    ("free_cash_flow", re.compile(r"自由現金流")),
+    ("operating_cash_flow", re.compile(r"營業活動(?:淨)?現金流|營業現金流")),
+    ("inventory_growth_yoy", re.compile(r"存貨年增率")),
+    ("revenue_growth_yoy", re.compile(r"營收年增率")),
     ("gross_margin", re.compile(r"毛利率")),
     ("operating_margin", re.compile(r"營業利益率|營益率")),
+    ("net_margin", re.compile(r"淨利率")),
+    ("current_ratio", re.compile(r"流動比率")),
     ("debt_ratio", re.compile(r"負債比(?:率)?")),
+    ("research_and_development_expense", re.compile(r"研發費用|研究發展費用")),
+    ("capital_expenditure", re.compile(r"資本支出")),
+    ("inventory", re.compile(r"存貨")),
     ("eps", re.compile(r"EPS|每股盈餘", re.I)),
     ("net_income", re.compile(r"稅後淨利|本期淨利|淨利")),
     ("revenue", re.compile(r"營業收入|月營收|營收")),
@@ -21,7 +36,7 @@ METRIC_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 PERCENT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(?:%|％)")
 PERCENTAGE_POINT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*個?百分點")
-AMOUNT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(兆|億|萬|百萬|元)")
+AMOUNT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(兆|億|百萬|萬|千|仟|元)(?:元)?")
 
 
 def _detect_metric(text: str) -> str | None:
