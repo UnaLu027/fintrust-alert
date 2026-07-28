@@ -43,6 +43,12 @@ def get_json(client: httpx.Client, path: str):
     return response.json()
 
 
+def post_json(client: httpx.Client, path: str, payload: dict):
+    response = client.post(path, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit FinTrust API, persistence and rule coverage.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -58,11 +64,21 @@ def main() -> None:
         companies = get_json(client, f"{base}/companies")
         rules = get_json(client, f"{base}/rules")
         snapshot = get_json(client, f"{base}/companies/{args.ticker}/analysis/latest")
-        metrics_payload = get_json(client, f"{base}/companies/{args.ticker}/metrics?limit=1000")
+        metrics_payload = get_json(
+            client,
+            f"{base}/companies/{args.ticker}/metrics?limit=1000&latest_only=true",
+        )
         runs = get_json(client, f"{base}/companies/{args.ticker}/analysis-runs?limit=20")
+        verification = post_json(
+            client,
+            f"{base}/claims/verify",
+            {"text": "台積電 2024 年全年營收較去年增加", "ticker": args.ticker},
+        )
 
     if health.get("status") != "ok":
         failures.append("health endpoint did not return status=ok")
+    if health.get("readiness_scope") != "configuration_only":
+        failures.append("health endpoint does not disclose its readiness scope")
     if not any(item.get("ticker") == args.ticker for item in companies.get("companies", [])):
         failures.append("ticker is absent from company registry")
     if not rules.get("rules"):
@@ -71,6 +87,8 @@ def main() -> None:
     run_id = snapshot.get("analysis_run_id")
     if not run_id:
         failures.append("latest snapshot has no analysis_run_id")
+    if metrics_payload.get("run_id") != run_id:
+        failures.append("latest_only metrics did not use the latest snapshot run_id")
 
     latest_run_rows = [
         item
@@ -111,6 +129,10 @@ def main() -> None:
             )
         )
 
+    verification_verdict = verification.get("verdict")
+    if verification_verdict == "insufficient_evidence":
+        failures.append("claim verification is not reading persisted pipeline facts")
+
     report = {
         "ticker": args.ticker,
         "analysis_run_id": run_id,
@@ -120,6 +142,7 @@ def main() -> None:
         "missing_required_metrics": missing_metrics,
         "insufficient_rule_ids": [item.get("rule_id") for item in insufficient_rules],
         "source_count": len(snapshot.get("sources", [])),
+        "claim_verification_verdict": verification_verdict,
         "failures": failures,
         "warnings": warnings,
         "result": "FAIL" if failures else "WARN" if warnings else "PASS",
