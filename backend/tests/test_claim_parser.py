@@ -32,3 +32,21 @@ def test_amount_does_not_use_year_as_claimed_value():
     claim = extract_claim("聯發科 2025 年全年營收為 5900 億元")
     assert claim.claimed_value == 5900
     assert claim.unit == "億"
+
+
+def test_extract_cash_flow_and_capex_intensity_metrics():
+    cash = extract_claim("台積電 2024 年全年營業現金流為 1.8 兆元")
+    capex = extract_claim("台積電 2024 年全年資本支出占營收比為 32%")
+    assert cash.metric == "operating_cash_flow"
+    assert cash.claimed_value == 1.8
+    assert cash.unit == "兆"
+    assert capex.metric == "capex_intensity"
+    assert capex.claimed_value == 32
+    assert capex.unit == "%"
+
+
+def test_extract_research_and_inventory_metrics():
+    rd = extract_claim("聯發科 2024 年全年研發強度為 24%")
+    inventory = extract_claim("日月光投控 2024 年全年存貨年增率為 8%")
+    assert rd.metric == "rd_intensity"
+    assert inventory.metric == "inventory_growth_yoy"
