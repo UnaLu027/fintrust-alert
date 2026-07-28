@@ -74,7 +74,7 @@ def build_frontend_snapshot(
             period_values=metric.period_values,
         )
         for code in preferred
-        if (metric := metric_map.get(code)) is not None
+        if (metric := metric_map.get(code)) is not None and metric.period_values
     ]
 
     rules = sorted(
