@@ -4,12 +4,28 @@ from app.models import FinancialFact
 from app.services.analysis_repository import AnalysisRepository, statement_type_for_metric
 
 
+DERIVED_STATEMENT_TYPES = {
+    "gross_margin": "income_statement",
+    "operating_margin": "income_statement",
+    "net_margin": "income_statement",
+    "revenue_growth_yoy": "income_statement",
+    "rd_intensity": "income_statement",
+    "inventory_growth_yoy": "balance_sheet",
+    "debt_ratio": "balance_sheet",
+    "current_ratio": "balance_sheet",
+    "operating_cash_flow": "cash_flow",
+    "cash_conversion_ratio": "cash_flow",
+    "free_cash_flow": "cash_flow",
+    "capex_intensity": "cash_flow",
+}
+
+
 class PipelineEvidenceRepository:
     """Read raw facts first, then derived metrics from the scheduled pipeline.
 
-    The claim verifier uses one `get_fact` contract.  Raw statement facts live in
+    The claim verifier uses one `get_fact` contract. Raw statement facts live in
     `normalized_financial_facts`, while ratios such as gross margin live in
-    `calculated_metrics`.  This adapter keeps those storage details out of the
+    `calculated_metrics`. This adapter keeps those storage details out of the
     verification engine and preserves source provenance from the latest snapshot.
     """
 
@@ -59,7 +75,10 @@ class PipelineEvidenceRepository:
             period=period,
             value=float(row["value"]),
             unit=str(row["unit"]),
-            statement_type=statement_type_for_metric(metric),
+            statement_type=DERIVED_STATEMENT_TYPES.get(
+                metric,
+                statement_type_for_metric(metric),
+            ),
             source_kind=source_kind,
             source_url=source.source_url,
             filed_at=snapshot.data_updated_at,
