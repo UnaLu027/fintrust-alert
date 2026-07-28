@@ -8,6 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "demo:backend": "bash scripts/codespaces-start-backend.sh",
+    "demo:official": "bash scripts/codespaces-run-demo.sh 2330 3 2024 official",
+    "demo:fixture": "bash scripts/codespaces-run-demo.sh 2330 3 2024 demo_fixture",
     "firebase:login": "npx firebase-tools login",
     "deploy:hosting": "npm run build && npx firebase-tools deploy --only hosting --project fintrust-alert"
   },
