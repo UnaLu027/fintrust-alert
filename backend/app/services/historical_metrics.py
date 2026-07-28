@@ -60,12 +60,13 @@ def calculate_historical_metrics(
     periods: list[HistoricalPeriodRecord],
 ) -> list[HistoricalTrendMetric]:
     available = [period for period in periods if period.status == "available"]
+    currency_unit = available[-1].currency_unit if available else "新台幣元"
     metrics = [
         _metric(
             code="revenue",
             label="營業收入",
             category="成長性",
-            unit="新台幣仟元",
+            unit=currency_unit,
             periods=available,
             calculate=lambda p: p.revenue,
             formula="MOPS iXBRL 年度營業收入欄位",
@@ -124,7 +125,7 @@ def calculate_historical_metrics(
             code="inventory",
             label="存貨",
             category="營運效率",
-            unit="新台幣仟元",
+            unit=currency_unit,
             periods=available,
             calculate=lambda p: p.inventory,
             formula="MOPS iXBRL 年末存貨欄位",
@@ -150,7 +151,7 @@ def calculate_historical_metrics(
             code="operating_cash_flow",
             label="營業活動現金流",
             category="現金流品質",
-            unit="新台幣仟元",
+            unit=currency_unit,
             periods=available,
             calculate=lambda p: p.operating_cash_flow,
             formula="MOPS iXBRL 營業活動淨現金流量欄位",
@@ -170,7 +171,7 @@ def calculate_historical_metrics(
             code="free_cash_flow",
             label="自由現金流",
             category="現金流品質",
-            unit="新台幣仟元",
+            unit=currency_unit,
             periods=available,
             calculate=lambda p: (
                 p.operating_cash_flow - abs(p.capital_expenditure)
