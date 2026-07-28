@@ -50,7 +50,8 @@ class HistoricalFinancialAnalysisService:
             result.severity == RuleSeverity.INSUFFICIENT_DATA for result in rule_results
         )
         return (
-            f"{company_name}已取得 {available_years} 個完整年度的 MOPS iXBRL 資料；"
+            f"{company_name}已取得 {available_years} 個可用年度的 MOPS iXBRL 申報；"
+            f"『可用』代表核心科目足以進行部分分析，不代表所有規則欄位皆完整。"
             f"歷史規則結果為高關注 {high} 項、需注意 {attention} 項、"
             f"資料問題 {data_issues} 項、趨勢觀察 {positive} 項、"
             f"資料不足 {insufficient} 項，整體狀態為 {overall.value}。"
