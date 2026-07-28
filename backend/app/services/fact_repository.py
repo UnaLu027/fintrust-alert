@@ -113,3 +113,7 @@ class FinancialFactRepository:
             statement_scope=row["statement_scope"],
             is_demo=bool(row["is_demo"]),
         )
+
+    def get_fact(self, ticker: str, metric: str, period: str) -> FinancialFact | None:
+        """Compatibility with the scheduled pipeline AnalysisRepository protocol."""
+        return self.get(ticker, metric, period)
