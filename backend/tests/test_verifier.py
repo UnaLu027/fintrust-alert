@@ -90,3 +90,21 @@ def test_percentage_point_decrease_uses_signed_comparison(tmp_path):
     assert result.verdict == VerificationVerdict.SUPPORTED
     assert result.evidence.calculated_value == -5
     assert result.difference == 0
+
+
+def test_money_claim_is_converted_to_official_thousand_dollar_unit(tmp_path):
+    repo = FinancialFactRepository(str(tmp_path / "facts.db"))
+    repo.upsert_many(
+        [
+            fact(
+                "2024FY",
+                590_000_000,
+                metric="revenue",
+                unit="新台幣仟元",
+            )
+        ]
+    )
+    claim = extract_claim("聯發科 2024 年全年營收為 5900 億元")
+    result = verify_claim(claim, repo, tolerance_percentage_points=0.1)
+    assert result.verdict == VerificationVerdict.SUPPORTED
+    assert result.difference == 0
