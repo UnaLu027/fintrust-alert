@@ -4,6 +4,7 @@ from app.models import VerificationVerdict
 from app.services.analysis_repository import SqliteAnalysisRepository
 from app.services.claim_parser import extract_claim
 from app.services.ingestion_pipeline import FinancialIngestionPipeline
+from app.services.pipeline_evidence_repository import PipelineEvidenceRepository
 from app.services.verifier import verify_claim
 
 
@@ -30,6 +31,23 @@ async def test_pipeline_facts_feed_claim_verifier_and_preserve_demo_provenance(t
     verification = verify_claim(claim, repository, tolerance_percentage_points=2)
     assert verification.verdict != VerificationVerdict.INSUFFICIENT_EVIDENCE
     assert verification.evidence is not None
+    assert verification.evidence.is_demo is True
+
+
+@pytest.mark.asyncio
+async def test_derived_ratio_claim_uses_calculated_pipeline_metric(tmp_path):
+    repository = SqliteAnalysisRepository(str(tmp_path / "pipeline.sqlite3"))
+    await FinancialIngestionPipeline(repository=repository).refresh_company(
+        "2330", years=3, end_year=2024, trigger="demo", source_mode="demo_fixture"
+    )
+    evidence_repository = PipelineEvidenceRepository(repository)
+
+    claim = extract_claim("台積電 2024 年全年毛利率為 55%")
+    verification = verify_claim(claim, evidence_repository, tolerance_percentage_points=2)
+
+    assert verification.verdict != VerificationVerdict.INSUFFICIENT_EVIDENCE
+    assert verification.evidence is not None
+    assert verification.evidence.metric == "gross_margin"
     assert verification.evidence.is_demo is True
 
 
