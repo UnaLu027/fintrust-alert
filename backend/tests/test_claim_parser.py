@@ -49,4 +49,6 @@ def test_extract_research_and_inventory_metrics():
     rd = extract_claim("聯發科 2024 年全年研發強度為 24%")
     inventory = extract_claim("日月光投控 2024 年全年存貨年增率為 8%")
     assert rd.metric == "rd_intensity"
-    assert inventory.metric == "inventory_growth_yoy"
+    assert inventory.metric == "inventory"
+    assert inventory.comparison_kind == ComparisonKind.YOY
+    assert inventory.comparison_period == "2023FY"
