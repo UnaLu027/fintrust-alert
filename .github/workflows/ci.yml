@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
       - run: pip install --quiet -r requirements-dev.txt
       - name: Compile backend modules
-        run: python -m compileall -q app
+        run: python -m compileall -q app scripts
       - name: Run backend tests
         run: pytest -q > pytest-output.txt 2>&1
         env:
@@ -52,12 +52,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate deployment scripts
+      - name: Validate deployment and Codespaces scripts
         run: >-
           bash -n
           backend/deploy-cloud-run.sh
           backend/setup-cloud-scheduler.sh
           scripts/deploy-cloud-run.sh
           scripts/deploy-firebase-hosting.sh
+          scripts/codespaces-start-backend.sh
+          scripts/codespaces-run-demo.sh
+          .devcontainer/post-create.sh
+      - name: Validate devcontainer JSON
+        run: python -m json.tool .devcontainer/devcontainer.json >/dev/null
       - name: Build Cloud Run container
         run: docker build --tag fintrust-alert-api:ci backend
