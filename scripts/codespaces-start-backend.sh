@@ -5,13 +5,19 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 if [[ ! -x backend/.venv/bin/python ]]; then
-  echo "找不到 backend/.venv，正在建立並安裝依賴。"
+  echo "找不到 backend/.venv，正在建立虛擬環境。"
   python -m venv backend/.venv
-  source backend/.venv/bin/activate
+fi
+
+source backend/.venv/bin/activate
+
+# Codespaces 的 postCreateCommand 可能被中斷，留下已存在但尚未安裝完成的
+# .venv。每次啟動都先確認核心套件；缺少時自動補裝，避免出現
+# `uvicorn: not found`。
+if ! python -c 'import fastapi, uvicorn, httpx, pydantic' >/dev/null 2>&1; then
+  echo "Python 依賴尚未完整安裝，正在補齊 FastAPI、Uvicorn 與 MOPS XBRL 套件。"
   python -m pip install --upgrade pip
-  pip install -r backend/requirements-dev.txt
-else
-  source backend/.venv/bin/activate
+  python -m pip install -r backend/requirements-dev.txt
 fi
 
 mkdir -p backend/data/mops_ixbrl_cache
@@ -44,4 +50,4 @@ echo "SQLite：${FINANCIAL_DATABASE_PATH}"
 echo "啟動 FinTrust FastAPI；請保持此 Terminal 開啟。"
 
 cd backend
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
