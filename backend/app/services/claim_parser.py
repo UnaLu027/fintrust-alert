@@ -12,15 +12,16 @@ from app.services.periods import normalize_period, previous_quarter, previous_ye
 
 
 # Put more specific expressions before generic ones so, for example, 自由現金流
-# is not consumed by the 營業現金流 pattern.
+# is not consumed by the 營業現金流 pattern.  YoY phrases deliberately map to
+# the underlying fact (revenue/inventory), because the verifier must recompute
+# the growth rate from the current and comparison periods rather than compare a
+# precomputed growth rate to another growth rate.
 METRIC_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("capex_intensity", re.compile(r"資本支出(?:占營收)?比(?:率)?|資本支出強度")),
     ("rd_intensity", re.compile(r"研發(?:費用)?占營收比(?:率)?|研發強度")),
     ("cash_conversion_ratio", re.compile(r"現金轉換比|營業現金流(?:／|/|除以)淨利")),
     ("free_cash_flow", re.compile(r"自由現金流")),
     ("operating_cash_flow", re.compile(r"營業活動(?:淨)?現金流|營業現金流")),
-    ("inventory_growth_yoy", re.compile(r"存貨年增率")),
-    ("revenue_growth_yoy", re.compile(r"營收年增率")),
     ("gross_margin", re.compile(r"毛利率")),
     ("operating_margin", re.compile(r"營業利益率|營益率")),
     ("net_margin", re.compile(r"淨利率")),
