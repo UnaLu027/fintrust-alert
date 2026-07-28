@@ -147,6 +147,13 @@ async def refresh_company_pipeline(
     years: int = Query(default=5, ge=3, le=5),
     end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
     trigger: Literal["scheduler", "manual", "demo", "startup"] = Query(default="manual"),
+    source_mode: Literal["official", "demo_fixture"] = Query(
+        default="official",
+        description=(
+            "official 會連線 TWSE／MOPS；demo_fixture 僅在外部來源無法連線時驗證流程，"
+            "回傳內容會明確標示為合成資料。"
+        ),
+    ),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> CompanyRefreshResult:
     result = await FinancialIngestionPipeline(repository=repository).refresh_company(
@@ -154,6 +161,7 @@ async def refresh_company_pipeline(
         years=years,
         end_year=end_year,
         trigger=trigger,
+        source_mode=source_mode,
     )
     if result.status == "failed":
         raise HTTPException(status_code=502, detail=result.error or "Financial refresh failed.")
@@ -169,12 +177,14 @@ async def refresh_all_company_pipelines(
     years: int = Query(default=5, ge=3, le=5),
     end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
     trigger: Literal["scheduler", "manual", "demo", "startup"] = Query(default="scheduler"),
+    source_mode: Literal["official", "demo_fixture"] = Query(default="official"),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> RefreshAllResult:
     return await FinancialIngestionPipeline(repository=repository).refresh_all(
         years=years,
         end_year=end_year,
         trigger=trigger,
+        source_mode=source_mode,
     )
 
 
