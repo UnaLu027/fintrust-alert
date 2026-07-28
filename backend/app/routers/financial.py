@@ -209,9 +209,24 @@ def latest_persisted_analysis(
 def persisted_metrics(
     ticker: str,
     limit: int = Query(default=200, ge=1, le=1000),
+    run_id: str | None = Query(default=None, description="只回傳指定 analysis run 的指標。"),
+    latest_only: bool = Query(
+        default=False,
+        description="自動使用最新 snapshot 的 run_id，避免混入舊分析紀錄。",
+    ),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ):
-    return {"ticker": ticker, "metrics": repository.list_metrics(ticker, limit)}
+    selected_run_id = run_id
+    if latest_only:
+        snapshot = repository.get_latest_snapshot(ticker)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="尚無已完成的分析快照。")
+        selected_run_id = snapshot.analysis_run_id
+    return {
+        "ticker": ticker,
+        "run_id": selected_run_id,
+        "metrics": repository.list_metrics(ticker, limit, selected_run_id),
+    }
 
 
 @router.get(
@@ -239,7 +254,7 @@ def extract(payload: ClaimExtractionRequest):
 @router.post("/claims/verify", response_model=ClaimVerificationResult)
 def verify(
     payload: ClaimVerificationRequest,
-    repository: FinancialFactRepository = Depends(get_fact_repository),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> ClaimVerificationResult:
     claim = extract_claim(
         payload.text,
