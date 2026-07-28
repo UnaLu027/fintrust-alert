@@ -36,10 +36,10 @@ class FinancialAnalysisService:
             return RuleSeverity.HIGH_ATTENTION
         if RuleSeverity.ATTENTION in severities:
             return RuleSeverity.ATTENTION
+        if RuleSeverity.INSUFFICIENT_DATA in severities:
+            return RuleSeverity.INSUFFICIENT_DATA
         if RuleSeverity.POSITIVE in severities:
             return RuleSeverity.POSITIVE
-        if severities == {RuleSeverity.INSUFFICIENT_DATA}:
-            return RuleSeverity.INSUFFICIENT_DATA
         return RuleSeverity.NORMAL
 
     @staticmethod
@@ -71,8 +71,8 @@ class FinancialAnalysisService:
         overall = self._overall_severity(rule_results)
 
         limitations = [
-            "TWSE OpenAPI 財務報表資料集屬最新公開快照；此階段尚未完成任意歷史期間查詢。",
-            "3–5 年歷史趨勢、存貨週轉與現金流規則需由 MOPS Inline XBRL 回填後啟用。",
+            "TWSE OpenAPI 財務報表資料集屬最新公開快照；此端點本身不提供任意歷史期間查詢。",
+            "完整 pipeline 會另由 MOPS Inline XBRL 取得 3–5 年年度資料並執行歷史與子產業規則。",
             "目前門檻為版本化、可調整的 MVP 預設值，不應解讀為所有半導體子產業的永久標準。",
             "規則結果是財務風險與趨勢提示，不構成投資建議或最終企業評價。",
         ]
