@@ -8,7 +8,7 @@ from app.models import (
     ExtractedFinancialClaim,
     VerificationVerdict,
 )
-from app.services.fact_repository import FinancialFactRepository
+from app.services.analysis_repository import AnalysisRepository
 
 
 def _direction_matches(direction: ClaimDirection, calculated: float) -> bool:
@@ -33,7 +33,7 @@ def _signed_expected(value: float | None, direction: ClaimDirection) -> float | 
 
 def verify_claim(
     claim: ExtractedFinancialClaim,
-    repository: FinancialFactRepository,
+    repository: AnalysisRepository,
     tolerance_percentage_points: float = 2.0,
 ) -> ClaimVerificationResult:
     if not claim.ticker or not claim.metric:
@@ -52,7 +52,7 @@ def verify_claim(
             limitations=["請提供年度或季度，例如 2025 年全年或 2025 年第 2 季。"],
         )
 
-    current = repository.get(claim.ticker, claim.metric, claim.period)
+    current = repository.get_fact(claim.ticker, claim.metric, claim.period)
     if current is None:
         return ClaimVerificationResult(
             claim=claim,
@@ -63,7 +63,7 @@ def verify_claim(
 
     comparison = None
     if claim.comparison_period:
-        comparison = repository.get(claim.ticker, claim.metric, claim.comparison_period)
+        comparison = repository.get_fact(claim.ticker, claim.metric, claim.comparison_period)
         if comparison is None:
             return ClaimVerificationResult(
                 claim=claim,
