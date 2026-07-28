@@ -126,7 +126,7 @@ class HealthResponse(BaseModel):
     industry: Literal["半導體"] = "半導體"
     method: str
     readiness_scope: Literal["configuration_only"] = "configuration_only"
-    persistence_backend: str
+    persistence_backend: str = "configured_by_environment"
     twse_openapi_ready: bool = True
     rule_engine_ready: bool = True
     historical_xbrl_ready: bool
