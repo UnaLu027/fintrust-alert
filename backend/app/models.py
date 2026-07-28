@@ -125,6 +125,12 @@ class HealthResponse(BaseModel):
     module: str
     industry: Literal["半導體"] = "半導體"
     method: str
+    readiness_scope: Literal["configuration_only"] = "configuration_only"
+    persistence_backend: str
     twse_openapi_ready: bool = True
     rule_engine_ready: bool = True
     historical_xbrl_ready: bool
+    note: str = (
+        "Health 僅確認服務、依賴與設定可載入；官方資料完整度須以 refresh、"
+        "latest snapshot 與 pipeline audit 驗證。"
+    )
