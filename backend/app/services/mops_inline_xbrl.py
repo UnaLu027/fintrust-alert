@@ -47,7 +47,10 @@ MOPS_DOWNLOAD_TEMPLATE = (
 
 # Each entry contains preferred Chinese labels followed by stable IFRS/TWSE
 # concept suffixes. Both are used because labels and taxonomy prefixes can vary
-# by filing year while the economic meaning remains the same.
+# by filing year while the economic meaning remains the same. Taiwan cash-flow
+# statement facts may use local statement item codes (for example AAAA and
+# B02700) rather than the long IFRS concept names, so those stable codes are
+# included explicitly.
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "revenue": (
         "營業收入",
@@ -93,18 +96,23 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "total_liabilities": ("負債總額", "負債合計", "Liabilities"),
     "equity": ("權益總額", "權益總計", "Equity"),
     "operating_cash_flow": (
+        "AAAA",
         "營業活動之淨現金流入（流出）",
         "營業活動之淨現金流入(流出)",
         "營業活動之淨現金流量",
         "NetCashFlowsFromUsedInOperatingActivities",
+        "NetCashFlowsFromOperatingActivities",
     ),
     "investing_cash_flow": (
+        "BBBB",
         "投資活動之淨現金流入（流出）",
         "投資活動之淨現金流入(流出)",
         "投資活動之淨現金流量",
         "NetCashFlowsFromUsedInInvestingActivities",
+        "NetCashFlowsFromInvestingActivities",
     ),
     "capital_expenditure": (
+        "B02700",
         "取得不動產、廠房及設備",
         "購置不動產、廠房及設備",
         "PaymentsToAcquirePropertyPlantAndEquipment",
@@ -258,7 +266,8 @@ def normalize_mops_annual_package(
         warnings.append("iXBRL 文件未解析出 context，系統不會使用未確認期間的數值。")
 
     core_found = sum(
-        values[field] is not None for field in ("revenue", "total_assets", "net_income")
+        values.get(field) is not None
+        for field in ("revenue", "net_income", "total_assets", "total_liabilities")
     )
     status = "available" if core_found >= 2 else "missing"
     if status == "missing":
@@ -422,4 +431,4 @@ class MopsInlineXbrlClient:
                 )
             candidate -= 1
 
-        return sorted(periods, key=lambda record: record.fiscal_year)
+        return sorted(periods, key=lambda period: period.fiscal_year)
