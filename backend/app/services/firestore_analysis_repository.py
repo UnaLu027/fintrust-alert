@@ -5,9 +5,11 @@ from typing import Any
 
 from app.financial_analysis_models import FinancialStatementAnalysisReport
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
+from app.models import FinancialFact
 from app.pipeline_models import AnalysisRunSummary, FrontendAnalysisSnapshot, PersistenceCounts
 from app.services.analysis_repository import (
     document_id,
+    financial_fact_from_row,
     historical_fact_rows,
     latest_fact_rows,
     metric_rows,
@@ -137,14 +139,30 @@ class FirestoreAnalysisRepository:
         payload.pop("updated_at", None)
         return FrontendAnalysisSnapshot.model_validate(payload)
 
-    def list_metrics(self, ticker: str, limit: int = 200) -> list[dict[str, Any]]:
+    def list_metrics(
+        self,
+        ticker: str,
+        limit: int = 200,
+        run_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         from google.cloud.firestore_v1.base_query import FieldFilter
 
-        documents = self.client.collection("calculated_metrics").where(
+        query = self.client.collection("calculated_metrics").where(
             filter=FieldFilter("ticker", "==", ticker)
-        ).stream()
+        )
+        if run_id:
+            query = query.where(filter=FieldFilter("run_id", "==", run_id))
+        documents = query.stream()
         rows = [document.to_dict() or {} for document in documents]
-        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        rows.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                str(row.get("analysis_type") or ""),
+                str(row.get("period") or ""),
+                str(row.get("metric_code") or ""),
+            ),
+            reverse=not bool(run_id),
+        )
         return rows[:limit]
 
     def list_runs(self, ticker: str, limit: int = 20) -> list[AnalysisRunSummary]:
@@ -156,3 +174,24 @@ class FirestoreAnalysisRepository:
         rows = [document.to_dict() or {} for document in documents]
         rows.sort(key=lambda row: str(row.get("started_at") or ""), reverse=True)
         return [AnalysisRunSummary.model_validate(row) for row in rows[:limit]]
+
+    def get_fact(self, ticker: str, metric: str, period: str) -> FinancialFact | None:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        documents = (
+            self.client.collection("normalized_financial_facts")
+            .where(filter=FieldFilter("ticker", "==", ticker))
+            .where(filter=FieldFilter("metric_code", "==", metric))
+            .where(filter=FieldFilter("period", "==", period))
+            .stream()
+        )
+        rows = [document.to_dict() or {} for document in documents]
+        if not rows:
+            return None
+        rows.sort(
+            key=lambda row: (
+                0 if row.get("analysis_type") == "historical" else 1,
+                str(row.get("retrieved_at") or ""),
+            )
+        )
+        return financial_fact_from_row(rows[0])
