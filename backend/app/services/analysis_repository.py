@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from app.financial_analysis_models import FinancialStatementAnalysisReport
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
+from app.models import FinancialFact
 from app.pipeline_models import AnalysisRunSummary, FrontendAnalysisSnapshot, PersistenceCounts
 
 
@@ -26,6 +27,17 @@ LATEST_FACT_FIELDS = [
     "current_liabilities", "total_liabilities", "equity", "monthly_revenue",
     "previous_month_revenue", "prior_year_month_revenue",
 ]
+
+INCOME_FIELDS = {
+    "revenue", "gross_profit", "operating_income", "net_income", "eps",
+    "research_and_development_expense",
+}
+BALANCE_FIELDS = {
+    "cash_and_cash_equivalents", "inventory", "current_assets", "total_assets",
+    "current_liabilities", "total_liabilities", "equity",
+}
+CASH_FLOW_FIELDS = {"operating_cash_flow", "investing_cash_flow", "capital_expenditure"}
+MONTHLY_FIELDS = {"monthly_revenue", "previous_month_revenue", "prior_year_month_revenue"}
 
 
 class AnalysisRepository(Protocol):
@@ -44,8 +56,14 @@ class AnalysisRepository(Protocol):
     ) -> PersistenceCounts: ...
 
     def get_latest_snapshot(self, ticker: str) -> FrontendAnalysisSnapshot | None: ...
-    def list_metrics(self, ticker: str, limit: int = 200) -> list[dict[str, Any]]: ...
+    def list_metrics(
+        self,
+        ticker: str,
+        limit: int = 200,
+        run_id: str | None = None,
+    ) -> list[dict[str, Any]]: ...
     def list_runs(self, ticker: str, limit: int = 20) -> list[AnalysisRunSummary]: ...
+    def get_fact(self, ticker: str, metric: str, period: str) -> FinancialFact | None: ...
 
 
 def to_json(value: Any) -> str:
@@ -57,11 +75,24 @@ def document_id(*parts: object) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
+def statement_type_for_metric(metric: str) -> str:
+    if metric in INCOME_FIELDS:
+        return "income_statement"
+    if metric in BALANCE_FIELDS:
+        return "balance_sheet"
+    if metric in CASH_FLOW_FIELDS:
+        return "cash_flow"
+    if metric in MONTHLY_FIELDS:
+        return "monthly_revenue"
+    return "income_statement"
+
+
 def historical_fact_rows(report: HistoricalFinancialAnalysisReport) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for period in report.periods:
         if period.status != "available":
             continue
+        demo = "DEMO FIXTURE" in period.source_name.upper()
         for field in HISTORICAL_FACT_FIELDS:
             value = getattr(period, field)
             if value is None:
@@ -75,7 +106,7 @@ def historical_fact_rows(report: HistoricalFinancialAnalysisReport) -> list[dict
                 "metric_code": field,
                 "value": value,
                 "unit": "元／股" if field == "eps" else period.currency_unit,
-                "source_kind": "mops_xbrl",
+                "source_kind": "mvp_fixture" if demo else "mops_xbrl",
                 "source_url": period.source_url,
                 "taxonomy_concept": period.concept_matches.get(field),
             })
@@ -84,10 +115,12 @@ def historical_fact_rows(report: HistoricalFinancialAnalysisReport) -> list[dict
 
 def latest_fact_rows(report: FinancialStatementAnalysisReport) -> list[dict[str, Any]]:
     period = report.report_period or report.monthly_revenue_period or "latest"
-    source_url = next(
-        (item.source_url for item in report.statement.source_coverage if item.status == "available"),
-        "https://openapi.twse.com.tw/",
+    coverage = next(
+        (item for item in report.statement.source_coverage if item.status == "available"),
+        None,
     )
+    source_url = coverage.source_url if coverage else "https://openapi.twse.com.tw/"
+    demo = bool(coverage and "DEMO FIXTURE" in coverage.source_name.upper())
     rows: list[dict[str, Any]] = []
     for field in LATEST_FACT_FIELDS:
         value = getattr(report.statement, field)
@@ -102,7 +135,7 @@ def latest_fact_rows(report: FinancialStatementAnalysisReport) -> list[dict[str,
             "metric_code": field,
             "value": value,
             "unit": "元／股" if field == "eps" else report.statement.currency_unit,
-            "source_kind": "twse_openapi",
+            "source_kind": "mvp_fixture" if demo else "twse_openapi",
             "source_url": source_url,
             "taxonomy_concept": None,
         })
@@ -168,6 +201,27 @@ def rule_rows(
             "actual_values": getattr(result, "actual_values", {}),
         })
     return rows
+
+
+def financial_fact_from_row(row: dict[str, Any]) -> FinancialFact:
+    source_kind = str(row["source_kind"])
+    analysis_type = str(row["analysis_type"])
+    return FinancialFact(
+        ticker=str(row["ticker"]),
+        company_name=str(row["company_name"]),
+        semiconductor_subindustry=str(row["subindustry"]),
+        metric=str(row["metric_code"]),
+        period=str(row["period"]),
+        value=float(row["value"]),
+        unit=str(row["unit"]),
+        statement_type=statement_type_for_metric(str(row["metric_code"])),
+        source_kind=source_kind,
+        source_url=str(row["source_url"]),
+        filed_at=row["retrieved_at"],
+        taxonomy_concept=row.get("taxonomy_concept"),
+        statement_scope="consolidated" if analysis_type == "historical" else "unknown",
+        is_demo=source_kind == "mvp_fixture",
+    )
 
 
 class SqliteAnalysisRepository:
@@ -304,12 +358,25 @@ class SqliteAnalysisRepository:
             ).fetchone()
         return FrontendAnalysisSnapshot.model_validate_json(row["snapshot_json"]) if row else None
 
-    def list_metrics(self, ticker: str, limit: int = 200) -> list[dict[str, Any]]:
+    def list_metrics(
+        self,
+        ticker: str,
+        limit: int = 200,
+        run_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM calculated_metrics WHERE ticker = ? ORDER BY rowid DESC LIMIT ?",
-                (ticker, limit),
-            ).fetchall()
+            if run_id:
+                rows = connection.execute(
+                    """SELECT * FROM calculated_metrics
+                    WHERE ticker = ? AND run_id = ?
+                    ORDER BY analysis_type, period, metric_code LIMIT ?""",
+                    (ticker, run_id, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM calculated_metrics WHERE ticker = ? ORDER BY rowid DESC LIMIT ?",
+                    (ticker, limit),
+                ).fetchall()
         return [dict(row) for row in rows]
 
     def list_runs(self, ticker: str, limit: int = 20) -> list[AnalysisRunSummary]:
@@ -319,6 +386,18 @@ class SqliteAnalysisRepository:
                 (ticker, limit),
             ).fetchall()
         return [AnalysisRunSummary.model_validate(dict(row)) for row in rows]
+
+    def get_fact(self, ticker: str, metric: str, period: str) -> FinancialFact | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM normalized_financial_facts
+                WHERE ticker = ? AND metric_code = ? AND period = ?
+                ORDER BY CASE analysis_type WHEN 'historical' THEN 0 ELSE 1 END,
+                         retrieved_at DESC
+                LIMIT 1""",
+                (ticker, metric, period),
+            ).fetchone()
+        return financial_fact_from_row(dict(row)) if row else None
 
 
 def build_analysis_repository() -> AnalysisRepository:
