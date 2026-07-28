@@ -102,6 +102,40 @@ def test_normalize_package_uses_current_year_context_not_comparative_fact(tsmc):
     assert "year=2025" in record.source_url
 
 
+def test_normalize_package_maps_taiwan_cash_flow_statement_codes(tsmc):
+    package = annual_package(113)
+    package.facts = [
+        item
+        for item in package.facts
+        if item.concept
+        not in {
+            "NetCashFlowsFromUsedInOperatingActivities",
+            "PaymentsToAcquirePropertyPlantAndEquipment",
+        }
+    ]
+    package.labels.pop("NetCashFlowsFromUsedInOperatingActivities")
+    package.labels.pop("PaymentsToAcquirePropertyPlantAndEquipment")
+    package.facts.extend(
+        [
+            fact("tifrs-full:AAAA", 1_826_177_068, "current_duration"),
+            fact("tifrs-full:B02700", -949_816_825, "current_duration"),
+        ]
+    )
+    package.labels.update(
+        {
+            "tifrs-full:AAAA": "Net cash flows from (used in) operating activities",
+            "tifrs-full:B02700": "Acquisition of property, plant and equipment",
+        }
+    )
+
+    record = normalize_mops_annual_package(tsmc, 113, package)
+
+    assert record.operating_cash_flow == pytest.approx(1_826_177_068)
+    assert record.capital_expenditure == pytest.approx(-949_816_825)
+    assert "operating_cash_flow" in record.fields_found
+    assert "capital_expenditure" in record.fields_found
+
+
 class FakeXbrlClient:
     def __init__(self):
         self.calls: list[tuple[str, int, int, str]] = []
