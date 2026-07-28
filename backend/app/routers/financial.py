@@ -39,6 +39,7 @@ from app.services.financial_rule_engine import FinancialRuleEngine
 from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
 from app.services.ingestion_pipeline import FinancialIngestionPipeline
 from app.services.mops_inline_xbrl import MopsInlineXbrlError
+from app.services.pipeline_evidence_repository import PipelineEvidenceRepository
 from app.services.twse_openapi import TwseOpenApiError
 from app.services.verifier import verify_claim
 
@@ -262,7 +263,8 @@ def verify(
         period_hint=payload.period,
         comparison_period_hint=payload.comparison_period,
     )
-    return verify_claim(claim, repository, payload.tolerance_percentage_points)
+    evidence_repository = PipelineEvidenceRepository(repository)
+    return verify_claim(claim, evidence_repository, payload.tolerance_percentage_points)
 
 
 @router.post("/facts/ingest")
