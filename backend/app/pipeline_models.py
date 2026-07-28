@@ -76,6 +76,7 @@ class CompanyRefreshResult(BaseModel):
     company_name: str
     subindustry: str
     trigger: Literal["scheduler", "manual", "demo", "startup"]
+    source_mode: Literal["official", "demo_fixture"] = "official"
     status: Literal["completed", "failed"]
     started_at: datetime
     completed_at: datetime
@@ -90,6 +91,7 @@ class RefreshAllResult(BaseModel):
     started_at: datetime
     completed_at: datetime
     trigger: Literal["scheduler", "manual", "demo", "startup"]
+    source_mode: Literal["official", "demo_fixture"] = "official"
     requested_companies: int
     completed_companies: int
     failed_companies: int
