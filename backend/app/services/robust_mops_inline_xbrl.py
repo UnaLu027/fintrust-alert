@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.historical_analysis_models import HistoricalPeriodRecord
@@ -41,7 +41,7 @@ EXTRA_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Used only as a lower-priority fallback after exact taxonomy aliases.  Each
+# Used only as a lower-priority fallback after exact taxonomy aliases. Each
 # tuple is a group whose tokens must all appear in the concept or label.
 FIELD_KEYWORD_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
     "operating_cash_flow": (
@@ -164,7 +164,7 @@ def robust_extract_package_value(
         if value is None:
             continue
 
-        # Exact aliases first, then the cleanest annual context.  Shorter
+        # Exact aliases first, then the cleanest annual context. Shorter
         # context ids usually represent the consolidated total rather than a
         # dimensional segment fact.
         candidate = (score, context_score, -len(context_ref), float(value), _local_name(concept))
@@ -271,6 +271,52 @@ class RobustMopsInlineXbrlClient(MopsInlineXbrlClient):
     async def fetch_annual(self, profile: CompanyProfile, roc_year: int) -> HistoricalPeriodRecord:
         package = await self.load_package(profile, roc_year)
         return robust_normalize_mops_annual_package(profile, roc_year, package)
+
+    async def fetch_history(
+        self,
+        profile: CompanyProfile,
+        *,
+        years: int = 5,
+        end_roc_year: int | None = None,
+    ) -> list[HistoricalPeriodRecord]:
+        if not 3 <= years <= 5:
+            raise ValueError("MVP 歷史期間僅支援 3 至 5 年。")
+
+        now = datetime.now(timezone.utc)
+        latest_candidate = end_roc_year or (now.year - 1911 - 1)
+        periods: list[HistoricalPeriodRecord] = []
+        attempts = 0
+        candidate = latest_candidate
+        while (
+            sum(period.status == "available" for period in periods) < years
+            and attempts < years + 2
+        ):
+            attempts += 1
+            try:
+                periods.append(await self.fetch_annual(profile, candidate))
+            except MopsInlineXbrlError as exc:
+                fiscal_year = candidate + 1911
+                source_url = (
+                    "https://mopsov.twse.com.tw/server-java/FileDownLoad"
+                    f"?functionName=t164sb01&step=9&co_id={profile.ticker}&year={candidate}"
+                    "&season=4&report_id=C"
+                )
+                periods.append(
+                    HistoricalPeriodRecord(
+                        ticker=profile.ticker,
+                        company_name=profile.name,
+                        subindustry=profile.subindustry,
+                        fiscal_year=fiscal_year,
+                        roc_year=candidate,
+                        period=f"{fiscal_year}FY",
+                        source_url=source_url,
+                        status="error",
+                        warnings=[str(exc)],
+                        fields_missing=list(FIELD_ALIASES),
+                    )
+                )
+            candidate -= 1
+        return sorted(periods, key=lambda period: period.fiscal_year)
 
     async def diagnose_annual(self, profile: CompanyProfile, roc_year: int) -> dict[str, Any]:
         package = await self.load_package(profile, roc_year)
