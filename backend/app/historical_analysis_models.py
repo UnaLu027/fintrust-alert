@@ -39,7 +39,11 @@ class HistoricalPeriodRecord(BaseModel):
     capital_expenditure: float | None = None
     research_and_development_expense: float | None = None
 
-    currency_unit: str = "新台幣仟元"
+    # Arelle/twmops returns the decoded XBRL monetary value in the fact unit.
+    # For official filings used by this MVP that unit is TWD, not thousands of
+    # TWD. Keeping the label aligned prevents a 1,000x presentation error while
+    # leaving ratio calculations unchanged.
+    currency_unit: str = "新台幣元"
     fields_found: list[str] = Field(default_factory=list)
     fields_missing: list[str] = Field(default_factory=list)
     concept_matches: dict[str, str] = Field(default_factory=dict)
