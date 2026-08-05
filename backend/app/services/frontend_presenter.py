@@ -48,6 +48,73 @@ SEVERITY_ORDER = {
     RuleSeverity.NORMAL: 5,
 }
 
+BLOCKING_SEVERITIES = {
+    RuleSeverity.DATA_ISSUE,
+    RuleSeverity.HIGH_ATTENTION,
+    RuleSeverity.ATTENTION,
+    RuleSeverity.INSUFFICIENT_DATA,
+}
+
+
+def _count_rules(rule_results, severity: RuleSeverity) -> int:
+    return sum(result.severity == severity for result in rule_results)
+
+
+def _combined_overall(
+    latest_report: FinancialStatementAnalysisReport,
+    historical_report: HistoricalFinancialAnalysisReport,
+) -> RuleSeverity:
+    """Prioritize the annual MOPS rule coverage used by the front-end snapshot.
+
+    The TWSE latest endpoint is useful as a same-run latest-data reference, but
+    its OpenAPI datasets do not expose every field needed by the annual
+    semiconductor rule engine.  A latest-layer `insufficient_data` therefore
+    should not make the combined read model look failed when the MOPS annual
+    pipeline produced complete historical metrics and rules.
+    """
+
+    if historical_report.overall_severity in BLOCKING_SEVERITIES:
+        return historical_report.overall_severity
+    if latest_report.overall_severity in {
+        RuleSeverity.DATA_ISSUE,
+        RuleSeverity.HIGH_ATTENTION,
+        RuleSeverity.ATTENTION,
+    }:
+        return latest_report.overall_severity
+    if RuleSeverity.POSITIVE in {
+        historical_report.overall_severity,
+        latest_report.overall_severity,
+    }:
+        return RuleSeverity.POSITIVE
+    return RuleSeverity.NORMAL
+
+
+def _snapshot_summary(
+    latest_report: FinancialStatementAnalysisReport,
+    historical_report: HistoricalFinancialAnalysisReport,
+) -> str:
+    start = historical_report.start_year
+    end = historical_report.end_year
+    period_text = f"{start}–{end}" if start and end else "近年"
+    high = _count_rules(historical_report.rule_results, RuleSeverity.HIGH_ATTENTION)
+    attention = _count_rules(historical_report.rule_results, RuleSeverity.ATTENTION)
+    data_issue = _count_rules(historical_report.rule_results, RuleSeverity.DATA_ISSUE)
+    insufficient = _count_rules(historical_report.rule_results, RuleSeverity.INSUFFICIENT_DATA)
+    positive = _count_rules(historical_report.rule_results, RuleSeverity.POSITIVE)
+    normal = _count_rules(historical_report.rule_results, RuleSeverity.NORMAL)
+    available = historical_report.available_years
+    rule_count = len(historical_report.rule_results)
+    metric_count = sum(1 for metric in historical_report.trend_metrics if metric.period_values)
+
+    return (
+        f"{historical_report.company_name}已完成官方財報資料管線：TWSE 最新快照與 "
+        f"MOPS {period_text} 年度合併 iXBRL。後端已取得 {available} 個可用年度，"
+        f"產生 {metric_count} 類歷史財務指標與 {rule_count} 條半導體／"
+        f"{historical_report.subindustry}規則。歷史規則結果：高關注 {high} 項、"
+        f"需注意 {attention} 項、資料問題 {data_issue} 項、資料不足 {insufficient} 項、"
+        f"正向觀察 {positive} 項、正常 {normal} 項。此 snapshot 已保存為前端可直接讀取的最新分析結果。"
+    )
+
 
 def build_frontend_snapshot(
     *,
@@ -126,10 +193,6 @@ def build_frontend_snapshot(
                 )
             )
 
-    overall = historical_report.overall_severity
-    if SEVERITY_ORDER[latest_report.overall_severity] < SEVERITY_ORDER[overall]:
-        overall = latest_report.overall_severity
-
     return FrontendAnalysisSnapshot(
         analysis_run_id=run_id,
         ticker=historical_report.ticker,
@@ -137,8 +200,8 @@ def build_frontend_snapshot(
         subindustry=historical_report.subindustry,
         generated_at=datetime.now(timezone.utc),
         data_updated_at=max(latest_report.analyzed_at, historical_report.analyzed_at),
-        overall_severity=overall,
-        summary=f"{latest_report.summary} {historical_report.summary}",
+        overall_severity=_combined_overall(latest_report, historical_report),
+        summary=_snapshot_summary(latest_report, historical_report),
         rule_version=historical_report.rule_version,
         threshold_basis=historical_report.threshold_basis,
         key_metrics=key_metrics,
