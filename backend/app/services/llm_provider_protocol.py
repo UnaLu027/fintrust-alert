@@ -78,6 +78,11 @@ def create_financial_llm_provider() -> FinancialLLMProvider:
     raw_provider = os.getenv("FINANCIAL_LLM_PROVIDER", "").strip().lower()
     provider_name = raw_provider or "openai_compatible"
 
+    if provider_name == "gemini":
+        from app.services.gemini_financial_analyst import GeminiFinancialAnalyst
+
+        return GeminiFinancialAnalyst()
+
     if provider_name == "anthropic":
         from app.services.anthropic_financial_analyst import AnthropicFinancialAnalyst
 
@@ -92,6 +97,6 @@ def create_financial_llm_provider() -> FinancialLLMProvider:
         provider_name,
         error=(
             f"Unsupported FINANCIAL_LLM_PROVIDER={provider_name!r}. "
-            "Supported values are 'anthropic' and 'openai_compatible'."
+            "Supported values are 'gemini', 'anthropic', and 'openai_compatible'."
         ),
     )
