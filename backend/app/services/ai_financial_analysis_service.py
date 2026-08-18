@@ -20,7 +20,7 @@ from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 
 
 class AIFinancialAnalysisService:
-    version = "ai-financial-analysis-0.2.1"
+    version = "ai-financial-analysis-0.2.0"
     supported_subindustries = {"IC 設計"}
 
     def __init__(
