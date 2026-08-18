@@ -17,6 +17,18 @@ def _growth(current: float | None, previous: float | None) -> float | None:
     return (current - previous) / abs(previous) * 100
 
 
+def _previous_value(
+    available: list[HistoricalPeriodRecord],
+    period: HistoricalPeriodRecord,
+    field: str,
+) -> float | None:
+    previous = next(
+        (item for item in available if item.fiscal_year == period.fiscal_year - 1),
+        None,
+    )
+    return getattr(previous, field) if previous is not None else None
+
+
 def _metric(
     *,
     code: str,
@@ -39,7 +51,11 @@ def _metric(
     latest = ordered[-1] if ordered else None
     previous = ordered[-2] if len(ordered) >= 2 else None
     change_percent = _growth(latest, previous)
-    change_pp = latest - previous if percentage_point_change and latest is not None and previous is not None else None
+    change_pp = (
+        latest - previous
+        if percentage_point_change and latest is not None and previous is not None
+        else None
+    )
 
     return HistoricalTrendMetric(
         code=code,
@@ -78,15 +94,75 @@ def calculate_historical_metrics(
             category="成長性",
             unit="%",
             periods=available[1:],
-            calculate=lambda p: _growth(
-                p.revenue,
-                next(
-                    (previous.revenue for previous in available if previous.fiscal_year == p.fiscal_year - 1),
-                    None,
-                ),
-            ),
+            calculate=lambda p: _growth(p.revenue, _previous_value(available, p, "revenue")),
             formula="（本年度營收－前一年度營收）÷｜前一年度營收｜×100",
             source_fields=["revenue"],
+        ),
+        _metric(
+            code="operating_income",
+            label="營業利益",
+            category="成長性",
+            unit=currency_unit,
+            periods=available,
+            calculate=lambda p: p.operating_income,
+            formula="MOPS iXBRL 年度營業利益欄位",
+            source_fields=["operating_income"],
+        ),
+        _metric(
+            code="operating_income_growth_yoy",
+            label="營業利益年增率",
+            category="成長性",
+            unit="%",
+            periods=available[1:],
+            calculate=lambda p: _growth(
+                p.operating_income,
+                _previous_value(available, p, "operating_income"),
+            ),
+            formula="（本年度營業利益－前一年度營業利益）÷｜前一年度營業利益｜×100",
+            source_fields=["operating_income"],
+        ),
+        _metric(
+            code="net_income",
+            label="本期淨利",
+            category="成長性",
+            unit=currency_unit,
+            periods=available,
+            calculate=lambda p: p.net_income,
+            formula="MOPS iXBRL 本期淨利欄位",
+            source_fields=["net_income"],
+        ),
+        _metric(
+            code="net_income_growth_yoy",
+            label="淨利年增率",
+            category="成長性",
+            unit="%",
+            periods=available[1:],
+            calculate=lambda p: _growth(
+                p.net_income,
+                _previous_value(available, p, "net_income"),
+            ),
+            formula="（本年度淨利－前一年度淨利）÷｜前一年度淨利｜×100",
+            source_fields=["net_income"],
+        ),
+        _metric(
+            code="eps",
+            label="每股盈餘",
+            category="成長性",
+            unit="元／股",
+            periods=available,
+            calculate=lambda p: p.eps,
+            formula="MOPS iXBRL 每股盈餘欄位",
+            source_fields=["eps"],
+        ),
+        _metric(
+            code="eps_growth_yoy",
+            label="EPS 年增率",
+            category="成長性",
+            unit="%",
+            periods=available[1:],
+            calculate=lambda p: _growth(p.eps, _previous_value(available, p, "eps")),
+            formula="（本年度 EPS－前一年度 EPS）÷｜前一年度 EPS｜×100",
+            source_fields=["eps"],
         ),
         _metric(
             code="gross_margin",
@@ -139,10 +215,7 @@ def calculate_historical_metrics(
             periods=available[1:],
             calculate=lambda p: _growth(
                 p.inventory,
-                next(
-                    (previous.inventory for previous in available if previous.fiscal_year == p.fiscal_year - 1),
-                    None,
-                ),
+                _previous_value(available, p, "inventory"),
             ),
             formula="（本年度末存貨－前一年度末存貨）÷｜前一年度末存貨｜×100",
             source_fields=["inventory"],
@@ -194,6 +267,29 @@ def calculate_historical_metrics(
             formula="｜取得不動產、廠房及設備現金流出｜÷營業收入×100",
             source_fields=["capital_expenditure", "revenue"],
             percentage_point_change=True,
+        ),
+        _metric(
+            code="research_and_development_expense",
+            label="研究發展費用",
+            category="半導體研發投入",
+            unit=currency_unit,
+            periods=available,
+            calculate=lambda p: p.research_and_development_expense,
+            formula="MOPS iXBRL 研究發展費用欄位",
+            source_fields=["research_and_development_expense"],
+        ),
+        _metric(
+            code="rd_expense_growth_yoy",
+            label="研發費用年增率",
+            category="半導體研發投入",
+            unit="%",
+            periods=available[1:],
+            calculate=lambda p: _growth(
+                p.research_and_development_expense,
+                _previous_value(available, p, "research_and_development_expense"),
+            ),
+            formula="（本年度研發費用－前一年度研發費用）÷｜前一年度研發費用｜×100",
+            source_fields=["research_and_development_expense"],
         ),
         _metric(
             code="rd_intensity",
