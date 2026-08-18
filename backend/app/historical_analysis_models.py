@@ -21,12 +21,14 @@ class HistoricalPeriodRecord(BaseModel):
     status: Literal["available", "missing", "error"]
 
     revenue: float | None = None
+    cost_of_goods_sold: float | None = None
     gross_profit: float | None = None
     operating_income: float | None = None
     net_income: float | None = None
     eps: float | None = None
 
     cash_and_cash_equivalents: float | None = None
+    accounts_receivable: float | None = None
     inventory: float | None = None
     current_assets: float | None = None
     total_assets: float | None = None
