@@ -20,7 +20,8 @@ from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 
 
 class AIFinancialAnalysisService:
-    version = "ai-financial-analysis-0.1.0"
+    version = "ai-financial-analysis-0.2.0"
+    supported_subindustries = {"IC 設計"}
 
     def __init__(
         self,
@@ -32,6 +33,10 @@ class AIFinancialAnalysisService:
         self.feature_engine = feature_engine or AnalysisFeatureEngine()
         self.rule_engine = rule_engine
         self.llm_analyst = llm_analyst or LLMFinancialAnalyst()
+
+    @classmethod
+    def supports(cls, subindustry: str) -> bool:
+        return subindustry in cls.supported_subindustries
 
     @staticmethod
     def _signal(results: list[MonitoredRuleResult]) -> DimensionSignal:
@@ -66,7 +71,9 @@ class AIFinancialAnalysisService:
             if signal == DimensionSignal.INSUFFICIENT_DATA:
                 summary = "目前缺少足夠欄位，暫不形成此面向結論。"
             elif triggered:
-                summary = "；".join(f"{item.name}（{item.severity.value}）" for item in triggered)
+                summary = "；".join(
+                    f"{item.name}（{item.severity.value}／{item.rule_scope}）" for item in triggered
+                )
             else:
                 summary = "目前可用規則均未觸發顯著注意或正向訊號。"
             assessments.append(
@@ -88,7 +95,7 @@ class AIFinancialAnalysisService:
     @staticmethod
     def _deterministic_summary(dimensions: list[DimensionAssessment]) -> str:
         parts = [f"{item.label}：{item.signal.value}" for item in dimensions]
-        return "；".join(parts) + "。此摘要由可重現的財務特徵與 IF–THEN 規則產生，LLM 僅負責後續語意整合。"
+        return "；".join(parts) + "。此摘要由可重現的財務特徵與分層 IF–THEN 規則產生，LLM 僅負責後續語意整合。"
 
     def health(self, *, subindustry: str = "IC 設計") -> dict[str, object]:
         engine = self.rule_engine or MonitorableFinancialRuleEngine(subindustry=subindustry)
@@ -99,9 +106,11 @@ class AIFinancialAnalysisService:
             "subindustry": subindustry,
             "rule_version": engine.version,
             "rule_count": catalog.rule_count,
+            "rule_scope_counts": catalog.rule_scope_counts,
             "dimensions": [dimension.value for dimension in catalog.dimensions],
             "llm": self.llm_analyst.health(),
             "monitorable_rules": True,
+            "automatic_pipeline_supported": True,
         }
 
     async def analyze_report(
@@ -110,6 +119,8 @@ class AIFinancialAnalysisService:
         *,
         use_llm: bool = True,
     ) -> AIFinancialAnalysisReport:
+        if not self.supports(report.subindustry):
+            raise ValueError(f"AI analysis v2 尚未建立 {report.subindustry} 的完整產業規則層。")
         rule_engine = self.rule_engine or MonitorableFinancialRuleEngine(subindustry=report.subindustry)
         features = self.feature_engine.build(report.trend_metrics)
         rules = rule_engine.evaluate(features)
@@ -133,6 +144,9 @@ class AIFinancialAnalysisService:
             )
 
         limitations = list(report.limitations)
+        limitations.append(
+            "AI v2 規則分為 common、semiconductor、ic_design 三層；heuristic_mvp 門檻僅供架構驗證，尚不是產業公認標準。"
+        )
         if trace.status == "not_configured":
             limitations.append("LLM 尚未設定；目前仍完成財務特徵、規則監控與八大面向 deterministic 分析。")
         if trace.status == "failed":
@@ -147,6 +161,7 @@ class AIFinancialAnalysisService:
             source_period_end=report.end_year,
             source_method=report.source_method,
             analysis_engine_version=self.version,
+            rule_catalog_version=rule_engine.version,
             feature_count=len(features),
             features=sorted(features.values(), key=lambda item: item.code),
             dimension_assessments=dimensions,
