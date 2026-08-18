@@ -7,6 +7,7 @@ from app.financial_analysis_models import RuleSeverity
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
 from app.services.company_registry import get_company
 from app.services.financial_analysis_service import UnsupportedCompanyError
+from app.services.financial_field_extensions import register_analysis_field_aliases
 from app.services.historical_metrics import calculate_historical_metrics
 from app.services.historical_rule_engine import HistoricalFinancialRuleEngine
 from app.services.robust_mops_inline_xbrl import RobustMopsInlineXbrlClient
@@ -19,6 +20,7 @@ class HistoricalFinancialAnalysisService:
         mops_client: Any | None = None,
         rule_engine: HistoricalFinancialRuleEngine | None = None,
     ) -> None:
+        register_analysis_field_aliases()
         self.mops_client = mops_client or RobustMopsInlineXbrlClient()
         self.rule_engine = rule_engine
 
@@ -31,9 +33,6 @@ class HistoricalFinancialAnalysisService:
             return RuleSeverity.HIGH_ATTENTION
         if RuleSeverity.ATTENTION in severities:
             return RuleSeverity.ATTENTION
-        # Partial rule coverage must not be hidden by otherwise normal or
-        # positive results.  This keeps the system conservative and
-        # explainable when a source field could not be mapped.
         if RuleSeverity.INSUFFICIENT_DATA in severities:
             return RuleSeverity.INSUFFICIENT_DATA
         if RuleSeverity.POSITIVE in severities:
@@ -46,9 +45,7 @@ class HistoricalFinancialAnalysisService:
         attention = sum(result.severity == RuleSeverity.ATTENTION for result in rule_results)
         data_issues = sum(result.severity == RuleSeverity.DATA_ISSUE for result in rule_results)
         positive = sum(result.severity == RuleSeverity.POSITIVE for result in rule_results)
-        insufficient = sum(
-            result.severity == RuleSeverity.INSUFFICIENT_DATA for result in rule_results
-        )
+        insufficient = sum(result.severity == RuleSeverity.INSUFFICIENT_DATA for result in rule_results)
         return (
             f"{company_name}已取得 {available_years} 個可用年度的 MOPS iXBRL 申報；"
             f"『可用』代表核心科目足以進行部分分析，不代表所有規則欄位皆完整。"
@@ -70,23 +67,15 @@ class HistoricalFinancialAnalysisService:
                 "MVP 僅分析已登錄的半導體公司；請先將公司加入 semiconductor registry。"
             )
 
-        periods = await self.mops_client.fetch_history(
-            profile,
-            years=years,
-            end_roc_year=end_roc_year,
-        )
+        periods = await self.mops_client.fetch_history(profile, years=years, end_roc_year=end_roc_year)
         available = [period for period in periods if period.status == "available"]
         metrics = calculate_historical_metrics(periods)
-        rule_engine = self.rule_engine or HistoricalFinancialRuleEngine(
-            subindustry=profile.subindustry
-        )
+        rule_engine = self.rule_engine or HistoricalFinancialRuleEngine(subindustry=profile.subindustry)
         rule_results = rule_engine.evaluate(periods, metrics)
         overall = self._overall_severity(rule_results)
 
         failed_periods = [period for period in periods if period.status != "available"]
-        missing_metric_codes = sorted(
-            metric.code for metric in metrics if not metric.period_values
-        )
+        missing_metric_codes = sorted(metric.code for metric in metrics if not metric.period_values)
         limitations = [
             "第一版只使用 MOPS 第 4 季／年度合併財報，避免把第二、三季累計數誤當成單季數值。",
             "MOPS iXBRL taxonomy 與公司自訂概念可能跨年度變動；無法可靠映射的欄位會標為資料不足。",
