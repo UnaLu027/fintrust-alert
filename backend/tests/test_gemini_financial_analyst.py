@@ -54,17 +54,38 @@ class FakeModels:
         self.response = response
         self.error = error
         self.last_kwargs = None
+        self.calls = []
 
     async def generate_content(self, **kwargs):
         self.last_kwargs = kwargs
+        self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return self.response
 
 
 class FakeClient:
-    def __init__(self, models: FakeModels):
+    def __init__(self, models):
         self.models = models
+
+
+class FakeAPIError(RuntimeError):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class PrimaryUnavailableModels:
+    def __init__(self, *, primary_model: str, fallback_response):
+        self.primary_model = primary_model
+        self.fallback_response = fallback_response
+        self.calls = []
+
+    async def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs["model"] == self.primary_model:
+            raise FakeAPIError(503, "simulated high demand")
+        return self.fallback_response
 
 
 def _response(text: str):
@@ -94,6 +115,12 @@ def test_gemini_blank_model_env_falls_back_to_36_flash(monkeypatch):
     assert analyst.configured is True
 
 
+def test_gemini_default_fallback_model_is_flash_lite(monkeypatch):
+    monkeypatch.delenv("FINANCIAL_LLM_FALLBACK_MODEL", raising=False)
+    analyst = GeminiFinancialAnalyst(api_key="demo-key", model="gemini-3.6-flash")
+    assert analyst.fallback_model == "gemini-3.5-flash-lite"
+
+
 def test_gemini_api_key_whitespace_is_stripped():
     analyst = GeminiFinancialAnalyst(api_key="  demo-key  ", model="gemini-3.6-flash")
     assert analyst._api_key == "demo-key"
@@ -101,7 +128,7 @@ def test_gemini_api_key_whitespace_is_stripped():
 
 
 @pytest.mark.asyncio
-async def test_gemini_success_uses_json_schema_structured_output():
+async def test_gemini_success_uses_json_schema_structured_output_without_deprecated_temperature():
     models = FakeModels(response=_response(_narrative_json()))
     analyst = GeminiFinancialAnalyst(
         api_key="demo-key",
@@ -124,6 +151,55 @@ async def test_gemini_success_uses_json_schema_structured_output():
     assert config["response_mime_type"] == "application/json"
     assert config["response_json_schema"]["type"] == "object"
     assert set(config["response_json_schema"]["properties"]["dimension_insights"]["required"]) == set(DIMENSION_KEYS)
+    assert "temperature" not in config
+
+
+@pytest.mark.asyncio
+async def test_gemini_503_uses_flash_lite_fallback():
+    models = PrimaryUnavailableModels(
+        primary_model="gemini-3.6-flash",
+        fallback_response=_response(_narrative_json()),
+    )
+    analyst = GeminiFinancialAnalyst(
+        api_key="demo-key",
+        model="gemini-3.6-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        client=FakeClient(models),
+    )
+    narrative, trace = await analyst.analyze(
+        company_name="聯發科",
+        ticker="2454",
+        subindustry="IC 設計",
+        dimensions=_dimensions(),
+        rules=[],
+    )
+    assert narrative is not None
+    assert trace.status == "completed"
+    assert trace.model == "gemini-3.5-flash-lite"
+    assert [call["model"] for call in models.calls] == ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_non_retryable_error_does_not_switch_models():
+    error = FakeAPIError(400, "simulated invalid request")
+    models = FakeModels(error=error)
+    analyst = GeminiFinancialAnalyst(
+        api_key="demo-key",
+        model="gemini-3.6-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        client=FakeClient(models),
+    )
+    narrative, trace = await analyst.analyze(
+        company_name="聯發科",
+        ticker="2454",
+        subindustry="IC 設計",
+        dimensions=_dimensions(),
+        rules=[],
+    )
+    assert narrative is None
+    assert trace.status == "failed"
+    assert trace.model == "gemini-3.6-flash"
+    assert len(models.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -155,6 +231,7 @@ def test_gemini_health_matches_provider_contract():
     assert health["provider_configured"] is True
     assert health["endpoint_configured"] is False
     assert health["structured_output"] is True
+    assert health["fallback_model"] == "gemini-3.5-flash-lite"
 
 
 def test_factory_selects_gemini(monkeypatch):
