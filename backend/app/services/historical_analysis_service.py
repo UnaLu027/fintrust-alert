@@ -7,7 +7,10 @@ from app.financial_analysis_models import RuleSeverity
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
 from app.services.company_registry import get_company
 from app.services.financial_analysis_service import UnsupportedCompanyError
-from app.services.financial_field_extensions import register_analysis_field_aliases
+from app.services.financial_field_extensions import (
+    register_analysis_field_aliases,
+    register_persistence_fields,
+)
 from app.services.historical_metrics import calculate_historical_metrics
 from app.services.historical_rule_engine import HistoricalFinancialRuleEngine
 from app.services.robust_mops_inline_xbrl import RobustMopsInlineXbrlClient
@@ -21,6 +24,7 @@ class HistoricalFinancialAnalysisService:
         rule_engine: HistoricalFinancialRuleEngine | None = None,
     ) -> None:
         register_analysis_field_aliases()
+        register_persistence_fields()
         self.mops_client = mops_client or RobustMopsInlineXbrlClient()
         self.rule_engine = rule_engine
 
