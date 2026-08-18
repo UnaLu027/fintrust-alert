@@ -29,3 +29,14 @@ def register_analysis_field_aliases() -> None:
         if field not in FIELD_ALIASES:
             FIELD_ALIASES[field] = aliases
     INSTANT_FIELDS.add("accounts_receivable")
+
+
+def register_persistence_fields() -> None:
+    """Keep normalized fact persistence aligned with the extended MOPS fields."""
+    from app.services import analysis_repository
+
+    for field in ("cost_of_goods_sold", "accounts_receivable"):
+        if field not in analysis_repository.HISTORICAL_FACT_FIELDS:
+            analysis_repository.HISTORICAL_FACT_FIELDS.append(field)
+    analysis_repository.INCOME_FIELDS.add("cost_of_goods_sold")
+    analysis_repository.BALANCE_FIELDS.add("accounts_receivable")
