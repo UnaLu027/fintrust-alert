@@ -60,6 +60,20 @@ class AnalysisFeatureEngine:
                 source_metrics=[metric.code],
                 formula="最新比率－前期比率",
             )
+            absolute_change = (
+                metric.latest_value - metric.previous_value
+                if metric.latest_value is not None and metric.previous_value is not None
+                else None
+            )
+            self._add(
+                features,
+                code=f"{metric.code}_change_absolute",
+                value=absolute_change,
+                unit=metric.unit,
+                label=f"{metric.label}較前期絕對變化",
+                source_metrics=[metric.code],
+                formula="最新值－前期值",
+            )
 
         def value(code: str) -> float | None:
             feature = features.get(code)
