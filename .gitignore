@@ -14,6 +14,14 @@ dist-ssr
 *.local
 .firebase/
 
+# Local secrets / dotenv files
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
 # Python backend local files
 backend/.venv/
 backend/venv/

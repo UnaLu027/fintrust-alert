@@ -131,6 +131,8 @@ class LLMAnalysisTrace(BaseModel):
     enabled: bool
     status: Literal["not_configured", "skipped", "completed", "failed"]
     endpoint_configured: bool
+    provider: str | None = None
+    provider_configured: bool | None = None
     model: str | None = None
     prompt_version: str = "financial-analysis-v1"
     latency_ms: int | None = None

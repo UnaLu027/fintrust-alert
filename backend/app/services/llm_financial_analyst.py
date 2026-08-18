@@ -11,8 +11,9 @@ from app.ai_analysis_models import DimensionAssessment, LLMAnalysisTrace, LLMNar
 
 
 class LLMFinancialAnalyst:
-    """Optional chat-completions-compatible LLM layer over deterministic evidence."""
+    """Optional OpenAI-compatible chat-completions LLM layer over deterministic evidence."""
 
+    provider_name = "openai_compatible"
     prompt_version = "financial-analysis-v1"
 
     def __init__(
@@ -34,7 +35,9 @@ class LLMFinancialAnalyst:
 
     def health(self) -> dict[str, Any]:
         return {
+            "provider": self.provider_name,
             "configured": self.configured,
+            "provider_configured": self.configured,
             "endpoint_configured": bool(self.endpoint),
             "model": self.model or None,
             "prompt_version": self.prompt_version,
@@ -69,6 +72,8 @@ class LLMFinancialAnalyst:
                 enabled=False,
                 status="not_configured",
                 endpoint_configured=bool(self.endpoint),
+                provider=self.provider_name,
+                provider_configured=False,
                 model=self.model or None,
                 prompt_version=self.prompt_version,
                 used_rule_ids=used_rule_ids,
@@ -120,6 +125,8 @@ class LLMFinancialAnalyst:
                 enabled=True,
                 status="completed",
                 endpoint_configured=True,
+                provider=self.provider_name,
+                provider_configured=True,
                 model=self.model,
                 prompt_version=self.prompt_version,
                 latency_ms=latency_ms,
@@ -131,6 +138,8 @@ class LLMFinancialAnalyst:
                 enabled=True,
                 status="failed",
                 endpoint_configured=True,
+                provider=self.provider_name,
+                provider_configured=True,
                 model=self.model,
                 prompt_version=self.prompt_version,
                 latency_ms=latency_ms,

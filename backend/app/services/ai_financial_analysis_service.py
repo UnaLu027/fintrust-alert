@@ -15,12 +15,12 @@ from app.ai_analysis_models import (
 from app.financial_analysis_models import RuleSeverity
 from app.historical_analysis_models import HistoricalFinancialAnalysisReport
 from app.services.analysis_feature_engine import AnalysisFeatureEngine
-from app.services.llm_financial_analyst import LLMFinancialAnalyst
+from app.services.llm_provider_protocol import FinancialLLMProvider, create_financial_llm_provider
 from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 
 
 class AIFinancialAnalysisService:
-    version = "ai-financial-analysis-0.2.0"
+    version = "ai-financial-analysis-0.2.1"
     supported_subindustries = {"IC 設計"}
 
     def __init__(
@@ -28,11 +28,11 @@ class AIFinancialAnalysisService:
         *,
         feature_engine: AnalysisFeatureEngine | None = None,
         rule_engine: MonitorableFinancialRuleEngine | None = None,
-        llm_analyst: LLMFinancialAnalyst | None = None,
+        llm_analyst: FinancialLLMProvider | None = None,
     ) -> None:
         self.feature_engine = feature_engine or AnalysisFeatureEngine()
         self.rule_engine = rule_engine
-        self.llm_analyst = llm_analyst or LLMFinancialAnalyst()
+        self.llm_analyst = llm_analyst or create_financial_llm_provider()
 
     @classmethod
     def supports(cls, subindustry: str) -> bool:
@@ -135,11 +135,15 @@ class AIFinancialAnalysisService:
             )
         else:
             narrative = None
+            llm_health = self.llm_analyst.health()
             trace = LLMAnalysisTrace(
                 enabled=False,
                 status="skipped",
-                endpoint_configured=bool(self.llm_analyst.endpoint),
+                endpoint_configured=bool(llm_health.get("endpoint_configured", False)),
+                provider=str(llm_health.get("provider") or self.llm_analyst.provider_name),
+                provider_configured=bool(llm_health.get("configured", self.llm_analyst.configured)),
                 model=self.llm_analyst.model or None,
+                prompt_version=str(llm_health.get("prompt_version") or "financial-analysis-v2"),
                 used_rule_ids=[item.rule_id for item in rules if item.triggered],
             )
 
