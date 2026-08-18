@@ -1,131 +1,170 @@
-# AI 財報分析引擎 v1
+# AI 財報分析引擎 v2：IC 設計產業化與自動 Pipeline
 
-## 目的
+## 1. 這一版修正了什麼
 
-本模組不是把財報整份交給 LLM 自由解讀，而是建立可追溯的 hybrid AI 分析流程：
+v1 將 24 條規則都放在 IC 設計規則檔中，容易讓人誤以為所有規則都是 IC 設計產業專屬標準。v2 改成三層規則：
 
-1. MOPS／XBRL 官方財報形成歷史財務指標。
-2. Feature Engine 建立直接指標、間接指標與跨指標差距。
-3. Monitorable Rule Engine 以設定檔執行 IF–THEN 分析。
-4. 八個分析面向分別形成 assessment。
-5. LLM 只接收結構化 evidence 與規則結果，負責跨面向整合與一般使用者說明。
-6. 每一條規則、使用欄位、實際值、觸發狀態與 LLM trace 都保留，方便後台監控與簡報展示。
+1. `common`：跨產業都成立的基本面與會計關係。
+2. `semiconductor`：半導體常見的產品組合、存貨循環、現金流分析。
+3. `ic_design`：IC 設計特別重視的研發投入、產品組合、庫存／應收週轉與研發轉化。
 
-## 八大分析面向
+總規則數仍為 24 條，但現在可以直接由 `rule_scope_counts` 看出：
 
-| Dimension | 中文 | 主要目的 |
-|---|---|---|
-| growth | 成長性 | 不只看營收，交叉營業利益、淨利與 EPS |
-| profitability | 獲利能力 | 毛利率、營業利益率、淨利率及其變化 |
-| rd_innovation | 研發與創新 | IC 設計研發投入及其產業脈絡 |
-| operating_efficiency | 營運效率 | 存貨與營收去化關係 |
-| cash_flow | 現金流品質 | OCF、FCF 與現金轉換能力 |
-| financial_structure | 財務結構 | 負債、流動性與現金緩衝 |
-| earnings_quality | 盈餘品質 | 帳面獲利與營業現金流是否同步 |
-| investment_efficiency | 投入轉化效率 | 研發投入是否有營收、毛利與現金流的間接支持 |
+- common：10
+- semiconductor：4
+- ic_design：10
 
-## Rule 類型
+因此簡報時應稱為「24 條分層分析規則」，而不是「24 條 IC 設計產業標準」。
 
-每條規則會標示 `assessment_type`：
+## 2. 產業依據
 
-- `direct`：直接用該面向核心財務指標衡量。
-- `indirect`：以其他財務結果驗證核心指標是否具有品質或轉化效果。
-- `cross_factor`：同時使用多個面向的條件判斷。
-- `trend`：以跨年度變化而非單一水準判斷。
+IC 設計 v2 的規則設計以聯發科官方投資人資料呈現方式作為重要參考：
 
-v1 的 IC 設計 rule catalog 共 24 條，平均每一個分析面向 3 條，後續可以透過同一 JSON schema 擴充，不需要每新增一條規則就重寫 endpoint。
+- MediaTek 為 fabless semiconductor company，研發是核心投入。
+- 官方永續／創新資料設定年度研發投入目標，支持 R&D 作為 IC 設計核心分析軸。
+- 2024 Q3 官方財報說明毛利率改善主要來自 product mix；同季營業費用增加主要來自較高 R&D investment。
+- 官方財報固定揭露 accounts receivable turnover days、inventory turnover days 與 operating cash flow，因此 v2 新增應收與存貨週轉天數，不再只靠期末存貨成長率作 proxy。
 
-## 可監控欄位
+規則中的 `evidence_basis` 與 `evidence_references` 會保留這些設計依據，方便後台與簡報追溯。
 
-`rule_monitoring` 每一筆至少包含：
+## 3. 門檻治理
+
+每條規則新增 `threshold_basis`。目前主要類型：
+
+- `directional`：只判斷增加／減少或正／負，不依賴任意數值門檻。
+- `accounting_directional`：依會計數值方向，例如淨利為正但 OCF 為負。
+- `accounting_identity_plus_trend`：例如 current ratio 100% 搭配下降趨勢。
+- `heuristic_mvp`：15 天、20 個百分點、0.8 倍等目前僅供 MVP 架構驗證。
+
+`heuristic_mvp` 不得宣稱為 IC 設計產業公認標準。下一階段需要以公司自身 3–5 年分布與同子產業 peer baseline（median / MAD）校準。
+
+## 4. R&D 規則修正
+
+### 不再使用
+
+`R&D expense ↑ AND R&D intensity ↑ -> positive`
+
+因為 IC 設計本來就高度研發密集，研發增加本身不能直接代表基本面改善。
+
+### v2
+
+- `IC_RD_001`：研發費用增加、研發強度大致維持，只標記「投入持續」，severity 為 normal。
+- `IC_RD_002`：只有研發費用本身未成長且 R&D intensity 明顯下降，才列 attention，避免營收快速成長使 intensity 被動下降造成誤判。
+- `IC_RD_003`：高研發投入 + 營收衰退 + 存貨相對營收背離 + cash conversion 弱，才列 high attention。
+
+這種設計把研發的直接衡量與營收、存貨、現金流的間接衡量分開。
+
+## 5. 新增 IC 設計營運效率指標
+
+MOPS iXBRL mapping 新增：
+
+- `cost_of_goods_sold`
+- `accounts_receivable`
+
+Historical Metric Engine 新增：
+
+- `inventory_turnover_days = 平均存貨 / |年度營業成本| * 365`
+- `receivable_turnover_days = 平均應收帳款 / 年度營收 * 365`
+
+Feature Engine 會為所有可比較指標建立 `*_change_absolute`，因此規則可以監控「週轉天數增加幾天」，而不是只看百分比變化。
+
+如果 taxonomy 無法可靠映射，欄位保持 missing，依賴規則回傳 `insufficient_data`，不以零值或 LLM 猜測補齊。
+
+## 6. 自動化 Pipeline
+
+Scheduler 原本每天依序呼叫四家公司 refresh：
+
+```text
+Cloud Scheduler
+  -> POST /api/v1/financial/admin/companies/{ticker}/refresh
+  -> TWSE latest
+  -> MOPS 3–5 year annual iXBRL
+  -> normalize
+  -> historical metrics
+  -> historical rules
+  -> AI Financial Analysis v2 (IC 設計目前支援 2454)
+       -> feature engine
+       -> common + semiconductor + ic_design rules
+       -> 8 dimension assessments
+       -> optional LLM synthesis
+  -> frontend snapshot
+  -> SQLite / Firestore persistence
+```
+
+不需要人工輸入財報數字。
+
+### LLM 自動執行
+
+正式 `official` refresh 預設允許 LLM：
+
+- `FINANCIAL_AI_AUTO_LLM_ENABLED=true`
+- `FINANCIAL_LLM_ENDPOINT`
+- `FINANCIAL_LLM_API_KEY`
+- `FINANCIAL_LLM_MODEL`
+
+若模型沒有設定，automatic pipeline 仍會完成 deterministic features、24 rules、8 dimensions，`llm_trace.status=not_configured`。
+
+`demo_fixture` 永遠不呼叫外部 LLM。
+
+AI 層執行失敗時，不會使官方財報 ingestion 整體失敗；錯誤會進 log 與 limitation，原始官方資料與 historical analysis 仍保存。
+
+## 7. Persistence 與 Monitoring
+
+`FrontendAnalysisSnapshot` schema 已升級到 `1.1.0` 並新增 `ai_analysis`。
+
+因此 Scheduler 背景分析完成後，既有 endpoint：
+
+`GET /api/v1/financial/companies/2454/analysis/latest`
+
+即可讀到：
+
+- `ai_analysis.features`
+- `ai_analysis.dimension_assessments`
+- `ai_analysis.rule_monitoring`
+- `ai_analysis.deterministic_summary`
+- `ai_analysis.llm_narrative`
+- `ai_analysis.llm_trace`
+
+每條 monitored rule 至少包含：
 
 - `rule_id`
-- `name`
+- `rule_scope`
+- `rule_version`
 - `dimension`
 - `assessment_type`
 - `severity`
 - `evaluation_status`
 - `triggered`
 - `logic_expression`
+- `threshold_basis`
+- `evidence_basis`
+- `evidence_references`
 - `direct_metrics`
 - `indirect_metrics`
 - `required_features`
 - `missing_features`
 - `actual_values`
-- `rationale`
 
-因此後台未來可以直接以這份資料做規則監控頁，不需要重新解析自然語言說明。
+這些欄位可直接做後台 rule monitoring 與老師 meeting 的 Swagger 截圖。
 
-## LLM 邊界
+## 8. 驗證策略
 
-LLM 不負責：
+單元／整合測試覆蓋：
 
-- 猜官方數字
-- 自行計算財務比率
-- 修改 IF–THEN 規則結果
-- 預測股價
-- 提供買賣建議
+- common / semiconductor / ic_design 三層規則數量與 provenance。
+- R&D intensity 單獨下降但 R&D expense 仍成長時，不得誤觸發 `IC_RD_002`。
+- 高壓情境會觸發多因素 high-attention rules。
+- COGS / Accounts Receivable XBRL extension mapping。
+- Inventory / Receivable turnover days 計算。
+- Demo scheduler-style pipeline 會自動建立並 persistence `ai_analysis`。
+- LLM mock response parsing 與 trace。
 
-LLM 負責：
+另外 `MOPS iXBRL Smoke` workflow 新增 `smoke_mediatek_ai.py`：實際抓取聯發科 2022–2024 三年官方年度 iXBRL，要求至少能形成核心 metrics、24 layered rules 與 8 dimensions；新 turnover 欄位若來源 taxonomy 缺失會在輸出中明確呈現 coverage，而不是假造數值。
 
-- 將八個 dimension assessment 做跨面向整合
-- 解釋直接證據與間接證據是否一致
-- 指出 mixed signals
-- 把結果轉成一般使用者可以理解的文字
+## 9. 目前仍需保留的研究限制
 
-LLM 透過環境變數設定：
-
-- `FINANCIAL_LLM_ENDPOINT`：完整的 chat-completions-compatible endpoint
-- `FINANCIAL_LLM_API_KEY`
-- `FINANCIAL_LLM_MODEL`
-
-沒有設定 LLM 時，deterministic 分析仍會完整回傳，`llm_trace.status` 會標記為 `not_configured`。
-
-## Demo / Swagger API
-
-### 1. AI Engine 狀態
-
-`GET /api/v1/financial/ai/health`
-
-適合截圖：
-
-- engine version
-- rule version
-- rule count
-- dimensions
-- LLM configured / model
-- monitorable_rules
-
-### 2. 規則監控總覽
-
-`GET /api/v1/financial/ai/rules`
-
-適合截圖：
-
-- 24 條規則數量
-- direct / indirect / cross_factor / trend
-- `logic_expression`
-- direct / indirect metrics
-
-### 3. 聯發科 AI 財報分析
-
-`POST /api/v1/financial/ai/companies/2454/analyze?years=3&use_llm=true`
-
-輸出重點：
-
-- `features`：財務與衍生特徵
-- `dimension_assessments`：八面向結果
-- `rule_monitoring`：每條規則的實際執行情形
-- `deterministic_summary`：規則層摘要
-- `llm_narrative`：LLM 跨面向整合說明
-- `llm_trace`：模型、prompt version、latency、使用的 rule IDs、錯誤狀態
-
-## v1 技術定位
-
-這一版先把「分析引擎」建立成可擴張的 AI infrastructure，而不是宣稱已經能完全取代專業分析師。下一輪可繼續增加：
-
-- 更多 IC 設計指標與 rules
-- 季度資料與更細緻趨勢
-- peer baseline / 同子產業分布
-- rule versioning 與後台 CRUD
-- AI claim / 新聞敘事與公司 fundamental profile 的一致性分析
+- AI v2 完整 layered catalog 目前只支援 IC 設計；晶圓代工與封裝測試仍沿用既有 historical subindustry engine。
+- 年度 Q4 資料適合 3–5 年趨勢，但 inventory / AR turnover 的即時性仍不如季度資料；未來應加入 quarterly analysis。
+- heuristic 門檻尚待 peer baseline 實證校準。
+- LLM 只整合結構化 evidence，不負責產生官方數字或修改 deterministic rule verdict。
+- 本系統是財報證據與基本面風險分析，不提供投資建議或股價預測。
