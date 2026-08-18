@@ -144,7 +144,6 @@ class MonitorableFinancialRuleEngine:
                 dimension_label=DIMENSION_LABELS[dimension],
                 assessment_type=rule["assessment_type"],
                 logic_expression=rule["logic_expression"],
-                rationale=rule["rationale"],
                 threshold_basis=rule["threshold_basis"],
                 evidence_basis=rule["evidence_basis"],
                 evidence_references=rule.get("evidence_references", []),
@@ -161,6 +160,7 @@ class MonitorableFinancialRuleEngine:
                         evaluation_status=RuleEvaluationStatus.INSUFFICIENT_DATA,
                         triggered=False,
                         missing_features=missing,
+                        rationale=rule["rationale"],
                     )
                 )
                 continue
