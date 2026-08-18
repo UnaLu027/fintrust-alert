@@ -9,6 +9,8 @@ from app.ai_analysis_models import DimensionAssessment, LLMAnalysisTrace, LLMNar
 
 
 _DEFAULT_MODEL = "gemini-3.6-flash"
+_DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+_RETRYABLE_API_CODES = {408, 429, 500, 502, 503, 504}
 _DIMENSION_KEYS = [
     "growth",
     "profitability",
@@ -49,18 +51,25 @@ class GeminiFinancialAnalyst:
     """Gemini Developer API provider over deterministic financial evidence."""
 
     provider_name = "gemini"
-    prompt_version = "financial-analysis-gemini-v1"
+    prompt_version = "financial-analysis-gemini-v2"
 
     def __init__(
         self,
         *,
         api_key: str | None = None,
         model: str | None = None,
+        fallback_model: str | None = None,
         client: Any | None = None,
     ) -> None:
         self._api_key = (api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")).strip()
         raw_model = model if model is not None else os.getenv("FINANCIAL_LLM_MODEL", "")
         self.model = (raw_model or _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
+        raw_fallback = (
+            fallback_model
+            if fallback_model is not None
+            else os.getenv("FINANCIAL_LLM_FALLBACK_MODEL", _DEFAULT_FALLBACK_MODEL)
+        )
+        self.fallback_model = (raw_fallback or "").strip()
         self._client = client
         self._root_client: Any | None = None
 
@@ -75,6 +84,7 @@ class GeminiFinancialAnalyst:
             "provider_configured": self.configured,
             "endpoint_configured": False,
             "model": self.model,
+            "fallback_model": self.fallback_model or None,
             "prompt_version": self.prompt_version,
             "structured_output": True,
         }
@@ -100,6 +110,37 @@ class GeminiFinancialAnalyst:
                 if item.triggered or item.evaluation_status.value != "evaluated"
             ],
         }
+
+    @staticmethod
+    def _is_retryable_api_error(exc: Exception) -> bool:
+        code = getattr(exc, "code", None)
+        try:
+            return int(code) in _RETRYABLE_API_CODES
+        except (TypeError, ValueError):
+            return False
+
+    async def _generate(self, *, model: str, user_prompt: str) -> Any:
+        return await self._get_client().models.generate_content(
+            model=model,
+            contents=user_prompt,
+            config={
+                "max_output_tokens": 2500,
+                "system_instruction": _SYSTEM_PROMPT,
+                "response_mime_type": "application/json",
+                "response_json_schema": _LLM_NARRATIVE_JSON_SCHEMA,
+            },
+        )
+
+    @staticmethod
+    def _parse_narrative(response: Any) -> LLMNarrative:
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, dict):
+            return LLMNarrative(**parsed)
+
+        text = str(getattr(response, "text", "") or "").strip()
+        if not text:
+            raise ValueError("Gemini response contained no text output.")
+        return LLMNarrative(**json.loads(text))
 
     async def analyze(
         self,
@@ -132,28 +173,30 @@ class GeminiFinancialAnalyst:
             ensure_ascii=False,
         )
         started = time.perf_counter()
+        effective_model = self.model
+
         try:
-            response = await self._get_client().models.generate_content(
-                model=self.model,
-                contents=user_prompt,
-                config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 2500,
-                    "system_instruction": _SYSTEM_PROMPT,
-                    "response_mime_type": "application/json",
-                    "response_json_schema": _LLM_NARRATIVE_JSON_SCHEMA,
-                },
-            )
+            try:
+                response = await self._generate(model=self.model, user_prompt=user_prompt)
+            except Exception as primary_exc:
+                should_fallback = (
+                    self.fallback_model
+                    and self.fallback_model != self.model
+                    and self._is_retryable_api_error(primary_exc)
+                )
+                if not should_fallback:
+                    raise
 
-            parsed = getattr(response, "parsed", None)
-            if isinstance(parsed, dict):
-                narrative = LLMNarrative(**parsed)
-            else:
-                text = str(getattr(response, "text", "") or "").strip()
-                if not text:
-                    raise ValueError("Gemini response contained no text output.")
-                narrative = LLMNarrative(**json.loads(text))
+                effective_model = self.fallback_model
+                try:
+                    response = await self._generate(model=effective_model, user_prompt=user_prompt)
+                except Exception as fallback_exc:
+                    raise RuntimeError(
+                        f"Primary Gemini model {self.model} failed with a retryable error "
+                        f"({primary_exc}); fallback model {effective_model} also failed ({fallback_exc})."
+                    ) from fallback_exc
 
+            narrative = self._parse_narrative(response)
             latency_ms = int((time.perf_counter() - started) * 1000)
             return narrative, LLMAnalysisTrace(
                 enabled=True,
@@ -161,7 +204,7 @@ class GeminiFinancialAnalyst:
                 endpoint_configured=False,
                 provider=self.provider_name,
                 provider_configured=True,
-                model=self.model,
+                model=effective_model,
                 prompt_version=self.prompt_version,
                 latency_ms=latency_ms,
                 used_rule_ids=used_rule_ids,
@@ -174,7 +217,7 @@ class GeminiFinancialAnalyst:
                 endpoint_configured=False,
                 provider=self.provider_name,
                 provider_configured=True,
-                model=self.model,
+                model=effective_model,
                 prompt_version=self.prompt_version,
                 latency_ms=latency_ms,
                 used_rule_ids=used_rule_ids,
