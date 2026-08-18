@@ -59,6 +59,8 @@ class AnalysisFeatureValue(BaseModel):
 class MonitoredRuleResult(BaseModel):
     rule_id: str
     name: str
+    rule_scope: Literal["common", "semiconductor", "ic_design"]
+    rule_version: str
     dimension: AnalysisDimension
     dimension_label: str
     assessment_type: Literal["direct", "indirect", "cross_factor", "trend"]
@@ -67,6 +69,9 @@ class MonitoredRuleResult(BaseModel):
     triggered: bool
     logic_expression: str
     rationale: str
+    threshold_basis: str
+    evidence_basis: str
+    evidence_references: list[str] = Field(default_factory=list)
     direct_metrics: list[str] = Field(default_factory=list)
     indirect_metrics: list[str] = Field(default_factory=list)
     required_features: list[str] = Field(default_factory=list)
@@ -90,12 +95,17 @@ class DimensionAssessment(BaseModel):
 class AnalysisRuleCatalogItem(BaseModel):
     rule_id: str
     name: str
+    rule_scope: Literal["common", "semiconductor", "ic_design"]
+    rule_version: str
     dimension: AnalysisDimension
     dimension_label: str
     assessment_type: Literal["direct", "indirect", "cross_factor", "trend"]
     severity: RuleSeverity
     logic_expression: str
     rationale: str
+    threshold_basis: str
+    evidence_basis: str
+    evidence_references: list[str] = Field(default_factory=list)
     direct_metrics: list[str] = Field(default_factory=list)
     indirect_metrics: list[str] = Field(default_factory=list)
     required_features: list[str] = Field(default_factory=list)
@@ -105,6 +115,7 @@ class AnalysisRuleCatalogResponse(BaseModel):
     version: str
     subindustry: str
     rule_count: int
+    rule_scope_counts: dict[str, int] = Field(default_factory=dict)
     dimensions: list[AnalysisDimension]
     rules: list[AnalysisRuleCatalogItem]
 
@@ -137,6 +148,7 @@ class AIFinancialAnalysisReport(BaseModel):
     source_period_end: int | None = None
     source_method: str
     analysis_engine_version: str
+    rule_catalog_version: str
     feature_count: int
     features: list[AnalysisFeatureValue]
     dimension_assessments: list[DimensionAssessment]
