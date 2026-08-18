@@ -7,6 +7,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
+from app.ai_analysis_models import AIFinancialAnalysisReport, AnalysisRuleCatalogResponse
 from app.dependencies import get_analysis_repository, get_fact_repository
 from app.financial_analysis_models import (
     FinancialStatementAnalysisReport,
@@ -27,6 +28,7 @@ from app.pipeline_models import (
     FrontendAnalysisSnapshot,
     RefreshAllResult,
 )
+from app.services.ai_financial_analysis_service import AIFinancialAnalysisService
 from app.services.analysis_repository import AnalysisRepository
 from app.services.claim_parser import extract_claim
 from app.services.company_registry import list_companies
@@ -38,6 +40,7 @@ from app.services.financial_analysis_service import (
 from app.services.financial_rule_engine import FinancialRuleEngine
 from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
 from app.services.ingestion_pipeline import FinancialIngestionPipeline
+from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 from app.services.mops_inline_xbrl import MopsInlineXbrlError
 from app.services.pipeline_evidence_repository import PipelineEvidenceRepository
 from app.services.twse_openapi import TwseOpenApiError
@@ -72,6 +75,58 @@ def health() -> HealthResponse:
         rule_engine_ready=True,
         historical_xbrl_ready=True,
     )
+
+
+@router.get("/ai/health")
+def ai_analysis_health():
+    """Expose AI engine, monitorable rule catalog and LLM readiness for demos."""
+    return AIFinancialAnalysisService().health(subindustry="IC 設計")
+
+
+@router.get("/ai/rules", response_model=AnalysisRuleCatalogResponse)
+def ai_analysis_rules() -> AnalysisRuleCatalogResponse:
+    """Return the full IC-design rule catalog so each rule can be monitored."""
+    return MonitorableFinancialRuleEngine(subindustry="IC 設計").catalog()
+
+
+@router.post(
+    "/ai/companies/{ticker}/analyze",
+    response_model=AIFinancialAnalysisReport,
+)
+async def analyze_company_with_ai(
+    ticker: str,
+    years: int = Query(default=3, ge=3, le=5),
+    end_year: int | None = Query(
+        default=None,
+        ge=2019,
+        le=datetime.now().year,
+        description="最後一個財報年度（西元年）；未提供時使用最近已完成年度。",
+    ),
+    use_llm: bool = Query(
+        default=True,
+        description="啟用設定好的 LLM 做跨面向整合；未設定時仍會回傳完整 deterministic 分析。",
+    ),
+) -> AIFinancialAnalysisReport:
+    end_roc_year = end_year - 1911 if end_year is not None else None
+    try:
+        historical = await HistoricalFinancialAnalysisService().analyze(
+            ticker,
+            years=years,
+            end_roc_year=end_roc_year,
+        )
+        return await AIFinancialAnalysisService().analyze_report(
+            historical,
+            use_llm=use_llm,
+        )
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MopsInlineXbrlError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}",
+        ) from exc
 
 
 @router.get("/companies", response_model=CompanyListResponse)
