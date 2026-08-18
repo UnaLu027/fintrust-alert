@@ -16,14 +16,16 @@ def period(year: int, **values) -> HistoricalPeriodRecord:
     )
 
 
-def test_calculate_historical_growth_margin_cash_and_capex_metrics():
+def test_calculate_historical_growth_margin_cash_capex_and_turnover_metrics():
     periods = [
         period(
             2022,
             revenue=1000,
+            cost_of_goods_sold=500,
             gross_profit=500,
             operating_income=300,
             net_income=200,
+            accounts_receivable=80,
             inventory=100,
             operating_cash_flow=250,
             capital_expenditure=-150,
@@ -36,9 +38,11 @@ def test_calculate_historical_growth_margin_cash_and_capex_metrics():
         period(
             2023,
             revenue=1100,
+            cost_of_goods_sold=572,
             gross_profit=528,
             operating_income=286,
             net_income=220,
+            accounts_receivable=88,
             inventory=130,
             operating_cash_flow=210,
             capital_expenditure=-180,
@@ -51,9 +55,11 @@ def test_calculate_historical_growth_margin_cash_and_capex_metrics():
         period(
             2024,
             revenue=1210,
+            cost_of_goods_sold=665.5,
             gross_profit=544.5,
             operating_income=290.4,
             net_income=242,
+            accounts_receivable=96.8,
             inventory=182,
             operating_cash_flow=300,
             capital_expenditure=-220,
@@ -77,3 +83,5 @@ def test_calculate_historical_growth_margin_cash_and_capex_metrics():
     assert round(metrics["capex_intensity"].period_values["2024FY"], 2) == 18.18
     assert metrics["rd_intensity"].period_values["2024FY"] == 10
     assert metrics["debt_ratio"].period_values["2024FY"] == 40
+    assert round(metrics["inventory_turnover_days"].period_values["2023FY"], 2) == 73.38
+    assert round(metrics["receivable_turnover_days"].period_values["2023FY"], 2) == 27.87
