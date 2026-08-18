@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.ai_analysis_models import AIFinancialAnalysisReport
 from app.financial_analysis_models import RuleSeverity
 
 
@@ -44,7 +45,7 @@ class FrontendSourceItem(BaseModel):
 
 
 class FrontendAnalysisSnapshot(BaseModel):
-    schema_version: str = "frontend-financial-snapshot-1.0.0"
+    schema_version: str = "frontend-financial-snapshot-1.1.0"
     analysis_run_id: str
     ticker: str
     company_name: str
@@ -58,6 +59,7 @@ class FrontendAnalysisSnapshot(BaseModel):
     threshold_basis: str
     key_metrics: list[FrontendMetricCard] = Field(default_factory=list)
     rule_cards: list[FrontendRuleCard] = Field(default_factory=list)
+    ai_analysis: AIFinancialAnalysisReport | None = None
     sources: list[FrontendSourceItem] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
@@ -84,6 +86,7 @@ class CompanyRefreshResult(BaseModel):
     history_available_years: int = 0
     persistence: PersistenceCounts = Field(default_factory=PersistenceCounts)
     snapshot: FrontendAnalysisSnapshot | None = None
+    ai_analysis: AIFinancialAnalysisReport | None = None
     error: str | None = None
 
 
