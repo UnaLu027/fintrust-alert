@@ -17,23 +17,33 @@ from app.financial_analysis_models import RuleSeverity
 
 
 class MonitorableFinancialRuleEngine:
-    """Config-driven rule engine for screenshot-friendly monitoring and later admin editing."""
+    """Config-driven layered rule engine with explicit provenance for monitoring."""
 
-    def __init__(self, rules_path: str | Path | None = None, *, subindustry: str = "IC 設計") -> None:
-        if rules_path is None:
-            if subindustry != "IC 設計":
-                raise ValueError("AI analysis engine v1 currently provides a full rule catalog for IC 設計.")
-            rules_path = Path(__file__).resolve().parents[1] / "rules" / "ic_design_analysis_rules.json"
-        self.rules_path = Path(rules_path)
-        self.config = json.loads(self.rules_path.read_text(encoding="utf-8"))
+    def __init__(self, *, subindustry: str = "IC 設計") -> None:
+        if subindustry != "IC 設計":
+            raise ValueError("AI analysis engine v2 currently provides a full layered catalog for IC 設計.")
+        rules_dir = Path(__file__).resolve().parents[1] / "rules"
+        self.subindustry = subindustry
+        self.configs = [
+            self._load(rules_dir / "common_analysis_rules.json"),
+            self._load(rules_dir / "semiconductor_analysis_rules.json"),
+            self._load(rules_dir / "ic_design_analysis_rules.json"),
+        ]
+        self.rules: list[dict[str, Any]] = []
+        for config in self.configs:
+            for raw_rule in config["rules"]:
+                rule = dict(raw_rule)
+                rule["rule_scope"] = config["scope"]
+                rule["rule_version"] = config["version"]
+                self.rules.append(rule)
+
+    @staticmethod
+    def _load(path: Path) -> dict[str, Any]:
+        return json.loads(path.read_text(encoding="utf-8"))
 
     @property
     def version(self) -> str:
-        return str(self.config["version"])
-
-    @property
-    def subindustry(self) -> str:
-        return str(self.config["subindustry"])
+        return "+".join(str(config["version"]) for config in self.configs)
 
     @staticmethod
     def _collect_features(condition: dict[str, Any]) -> set[str]:
@@ -81,19 +91,27 @@ class MonitorableFinancialRuleEngine:
 
     def catalog(self) -> AnalysisRuleCatalogResponse:
         items: list[AnalysisRuleCatalogItem] = []
-        for rule in self.config["rules"]:
+        scope_counts: dict[str, int] = {}
+        for rule in self.rules:
             dimension = AnalysisDimension(rule["dimension"])
             required = sorted(self._collect_features(rule["condition"]))
+            scope = str(rule["rule_scope"])
+            scope_counts[scope] = scope_counts.get(scope, 0) + 1
             items.append(
                 AnalysisRuleCatalogItem(
                     rule_id=rule["rule_id"],
                     name=rule["name"],
+                    rule_scope=scope,
+                    rule_version=rule["rule_version"],
                     dimension=dimension,
                     dimension_label=DIMENSION_LABELS[dimension],
                     assessment_type=rule["assessment_type"],
                     severity=RuleSeverity(rule["severity"]),
                     logic_expression=rule["logic_expression"],
                     rationale=rule["rationale"],
+                    threshold_basis=rule["threshold_basis"],
+                    evidence_basis=rule["evidence_basis"],
+                    evidence_references=rule.get("evidence_references", []),
                     direct_metrics=rule.get("direct_metrics", []),
                     indirect_metrics=rule.get("indirect_metrics", []),
                     required_features=required,
@@ -103,6 +121,7 @@ class MonitorableFinancialRuleEngine:
             version=self.version,
             subindustry=self.subindustry,
             rule_count=len(items),
+            rule_scope_counts=scope_counts,
             dimensions=sorted({item.dimension for item in items}, key=lambda item: item.value),
             rules=items,
         )
@@ -111,29 +130,37 @@ class MonitorableFinancialRuleEngine:
         feature_values = {code: feature.value for code, feature in features.items()}
         results: list[MonitoredRuleResult] = []
 
-        for rule in self.config["rules"]:
+        for rule in self.rules:
             dimension = AnalysisDimension(rule["dimension"])
             required = sorted(self._collect_features(rule["condition"]))
             missing = [code for code in required if code not in feature_values]
             actual_values = {code: feature_values.get(code) for code in required}
+            common_kwargs = dict(
+                rule_id=rule["rule_id"],
+                name=rule["name"],
+                rule_scope=rule["rule_scope"],
+                rule_version=rule["rule_version"],
+                dimension=dimension,
+                dimension_label=DIMENSION_LABELS[dimension],
+                assessment_type=rule["assessment_type"],
+                logic_expression=rule["logic_expression"],
+                rationale=rule["rationale"],
+                threshold_basis=rule["threshold_basis"],
+                evidence_basis=rule["evidence_basis"],
+                evidence_references=rule.get("evidence_references", []),
+                direct_metrics=rule.get("direct_metrics", []),
+                indirect_metrics=rule.get("indirect_metrics", []),
+                required_features=required,
+                actual_values=actual_values,
+            )
             if missing:
                 results.append(
                     MonitoredRuleResult(
-                        rule_id=rule["rule_id"],
-                        name=rule["name"],
-                        dimension=dimension,
-                        dimension_label=DIMENSION_LABELS[dimension],
-                        assessment_type=rule["assessment_type"],
+                        **common_kwargs,
                         severity=RuleSeverity.INSUFFICIENT_DATA,
                         evaluation_status=RuleEvaluationStatus.INSUFFICIENT_DATA,
                         triggered=False,
-                        logic_expression=rule["logic_expression"],
-                        rationale=rule["rationale"],
-                        direct_metrics=rule.get("direct_metrics", []),
-                        indirect_metrics=rule.get("indirect_metrics", []),
-                        required_features=required,
                         missing_features=missing,
-                        actual_values=actual_values,
                     )
                 )
                 continue
@@ -149,24 +176,14 @@ class MonitorableFinancialRuleEngine:
                 status = RuleEvaluationStatus.ERROR
                 error = str(exc)
 
-            rationale = rule["rationale"] if error is None else f"規則執行錯誤：{error}"
             results.append(
                 MonitoredRuleResult(
-                    rule_id=rule["rule_id"],
-                    name=rule["name"],
-                    dimension=dimension,
-                    dimension_label=DIMENSION_LABELS[dimension],
-                    assessment_type=rule["assessment_type"],
+                    **common_kwargs,
                     severity=severity,
                     evaluation_status=status,
                     triggered=triggered,
-                    logic_expression=rule["logic_expression"],
-                    rationale=rationale,
-                    direct_metrics=rule.get("direct_metrics", []),
-                    indirect_metrics=rule.get("indirect_metrics", []),
-                    required_features=required,
                     missing_features=[],
-                    actual_values=actual_values,
+                    rationale=(rule["rationale"] if error is None else f"規則執行錯誤：{error}"),
                 )
             )
 
