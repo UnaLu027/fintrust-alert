@@ -3,25 +3,16 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.company_registry import get_company
+from app.services.financial_field_extensions import register_analysis_field_aliases
 from app.services.robust_mops_inline_xbrl import robust_normalize_mops_annual_package
 
 
 def context(context_id: str, *, start: str | None = None, end: str | None = None, instant: str | None = None):
-    return SimpleNamespace(
-        context_id=context_id,
-        period_start=start,
-        period_end=end,
-        instant=instant,
-    )
+    return SimpleNamespace(context_id=context_id, period_start=start, period_end=end, instant=instant)
 
 
 def fact(concept: str, value: float, context_ref: str):
-    return SimpleNamespace(
-        concept=concept,
-        value=str(value),
-        context_ref=context_ref,
-        unit="TWD",
-    )
+    return SimpleNamespace(concept=concept, value=str(value), context_ref=context_ref, unit="TWD")
 
 
 def test_robust_mapper_uses_twmops_cash_flow_concept_and_english_extension_label():
@@ -90,3 +81,40 @@ def test_robust_mapper_does_not_use_balance_sheet_ppe_as_capex():
 
     record = robust_normalize_mops_annual_package(company, 113, package)
     assert record.capital_expenditure is None
+
+
+def test_extended_ic_design_fields_map_operating_cost_and_receivables():
+    register_analysis_field_aliases()
+    company = get_company("2454")
+    assert company is not None
+    duration = "currentDuration"
+    instant = "currentInstant"
+    package = SimpleNamespace(
+        contexts={
+            duration: context(duration, start="2024-01-01", end="2024-12-31"),
+            instant: context(instant, instant="2024-12-31"),
+        },
+        facts=[
+            fact("Revenue", 530_586, duration),
+            fact("OperatingCosts", 267_200, duration),
+            fact("ProfitLoss", 107_000, duration),
+            fact("Assets", 700_000, instant),
+            fact("Liabilities", 220_000, instant),
+            fact("AccountsReceivableNet", 50_000, instant),
+        ],
+        labels={
+            "Revenue": "營業收入",
+            "OperatingCosts": "營業成本",
+            "ProfitLoss": "本期淨利",
+            "Assets": "資產總額",
+            "Liabilities": "負債總額",
+            "AccountsReceivableNet": "應收帳款淨額",
+        },
+        labels_en={},
+    )
+
+    record = robust_normalize_mops_annual_package(company, 113, package)
+    assert record.cost_of_goods_sold == pytest.approx(267_200)
+    assert record.accounts_receivable == pytest.approx(50_000)
+    assert record.concept_matches["cost_of_goods_sold"] == "OperatingCosts"
+    assert record.concept_matches["accounts_receivable"] == "AccountsReceivableNet"
