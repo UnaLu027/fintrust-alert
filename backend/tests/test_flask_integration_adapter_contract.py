@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,9 @@ def load_fintrust_client_module():
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # dataclasses needs the dynamically-loaded module to exist in sys.modules
+    # while class annotations are processed.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
