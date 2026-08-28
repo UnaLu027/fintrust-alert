@@ -99,7 +99,7 @@ def test_integration_contract_mentions_teacher_requested_sources() -> None:
     assert "法說會" in contract
     assert "重大訊息" in contract
     assert "MOPS" in contract
-    assert "OpenAI" in plan
+    assert "Gemini" in plan
     assert "封裝測試" in plan
 
 
