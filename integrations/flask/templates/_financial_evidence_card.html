@@ -1,0 +1,27 @@
+<section class="financial-evidence-card" data-financial-evidence data-ticker="{{ ticker|default('2330') }}">
+  <div class="financial-evidence-card__header">
+    <div>
+      <p class="financial-evidence-card__eyebrow">官方財報證據</p>
+      <h2>財報分析快照</h2>
+    </div>
+    <div class="financial-evidence-card__controls">
+      <input id="fintrust-ticker" name="ticker" value="{{ ticker|default('2330') }}" aria-label="公司代號" />
+      <button type="button" data-fintrust-load>更新證據</button>
+    </div>
+  </div>
+
+  <p class="financial-evidence-card__note">
+    本區塊由 FastAPI 財報分析服務提供，資料來源以公開資訊觀測站年度合併財報為主，並保留公式、年度數值與規則結果。
+  </p>
+
+  <div data-fintrust-status class="financial-evidence-card__status">尚未載入官方財報證據。</div>
+
+  <div data-fintrust-summary class="financial-evidence-card__summary" hidden></div>
+
+  <div class="financial-evidence-card__metrics" data-fintrust-metrics hidden></div>
+
+  <details class="financial-evidence-card__limitations" data-fintrust-limitations hidden>
+    <summary>資料限制與說明</summary>
+    <ul></ul>
+  </details>
+</section>
