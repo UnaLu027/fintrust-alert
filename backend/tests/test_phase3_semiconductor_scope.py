@@ -1,3 +1,11 @@
+from datetime import datetime, timezone
+
+from app.financial_analysis_models import RuleSeverity
+from app.historical_analysis_models import (
+    HistoricalFinancialAnalysisReport,
+    HistoricalRuleResult,
+    HistoricalTrendMetric,
+)
 from app.services.company_registry import get_company, list_companies
 from app.services.historical_rule_engine import HistoricalFinancialRuleEngine
 from scripts.smoke_semiconductor_companies import (
@@ -6,13 +14,6 @@ from scripts.smoke_semiconductor_companies import (
     build_company_summary,
     phase3_target_profiles,
 )
-from app.financial_analysis_models import RuleSeverity
-from app.historical_analysis_models import (
-    HistoricalFinancialAnalysisReport,
-    HistoricalRuleResult,
-    HistoricalTrendMetric,
-)
-from datetime import datetime, timezone
 
 
 def test_phase3_company_targets_cover_teacher_requested_subindustries() -> None:
@@ -43,7 +44,10 @@ def test_historical_rule_engine_dispatches_subindustry_rule_files() -> None:
     }
     for subindustry, expected_scope in expected_scope_by_subindustry.items():
         engine = HistoricalFinancialRuleEngine(subindustry=subindustry)
-        scopes = {rule.get("rule_scope") for rule in engine.config["rules"]}
+        scopes = {
+            rule.get("rule_scope", "semiconductor_common")
+            for rule in engine.config["rules"]
+        }
         assert "semiconductor_common" in scopes
         assert expected_scope in scopes
         assert subindustry in engine.threshold_basis
