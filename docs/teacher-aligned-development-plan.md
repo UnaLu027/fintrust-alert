@@ -22,22 +22,18 @@
 
 - 共享 Flask 專案可透過 proxy 呼叫 FastAPI。
 - 前端可顯示 latest snapshot 的公司、整體狀態、摘要與 key metrics。
-- OpenAI key、FastAPI token、base URL 都只放後端環境變數。
+- Gemini key、FastAPI token、base URL 都只放後端環境變數。
 
-## Phase 2：統一 LLM provider
+## Phase 2：統一 LLM provider（Gemini）
 
 目標：回應老師提出的「大語言模型 API 要統一」問題。
 
-短期做法：
+組內目前決定：
 
-- 保留 existing `openai_compatible` provider。
-- 使用 `FINANCIAL_LLM_PROVIDER=openai_compatible`。
-- 透過 `FINANCIAL_LLM_ENDPOINT` 與 `FINANCIAL_LLM_API_KEY` 接 OpenAI-compatible Chat Completions API。
-
-中期做法：
-
-- 新增 native `openai` provider。
-- 讓組內所有摘要、主張抽取、法說會整理都由後端 gateway 統一呼叫。
+- 先統一使用 Gemini，不在此階段改成 OpenAI。
+- `FINANCIAL_LLM_PROVIDER=gemini` 作為目前主要設定。
+- `GEMINI_API_KEY` 只由後端環境變數或 Secret Manager 注入，不寫入 Git，也不放進前端 JavaScript。
+- 既有 `anthropic` 與 `openai_compatible` provider 保留為架構彈性，但不是目前整合優先事項。
 
 原則：
 
@@ -46,6 +42,7 @@
 - LLM 不重算會計值。
 - LLM 不修改 deterministic rule verdict。
 - LLM 不提供投資建議。
+- LLM 失敗時 deterministic 財報分析仍可使用。
 
 ## Phase 3：半導體子產業擴充
 
@@ -60,11 +57,18 @@
 | 2454 | 聯發科 | IC 設計 | 驗證 AI v2 / IC design rule |
 | 3711 | 日月光投控 | 封裝測試 | 回應老師封測建議 |
 
+交付內容：
+
+- `backend/scripts/smoke_semiconductor_companies.py`
+- `npm run demo:semiconductor`
+- `backend/tests/test_phase3_semiconductor_scope.py`
+
 驗收標準：
 
-- 每家公司可產生 latest snapshot。
+- registry 明確包含 2330、2303、2454、3711。
 - 不同子產業載入對應規則，不誤套 IC design rules。
-- smoke script 能列出 status、available years、missing metrics、rule count。
+- smoke script 能列出 status、available years、missing metrics、rule count、rule scope counts。
+- 聯發科可額外驗證 deterministic AI v2；晶圓代工與封裝測試先保留 historical subindustry engine。
 
 ## Phase 4：法說會資料管線
 
@@ -82,7 +86,7 @@
 後續再做：
 
 - PDF / HTML 文字抽取
-- OpenAI 摘要
+- Gemini 摘要
 - 展望、資本支出、庫存、需求、營收相關 claim extraction
 - 與年度財報指標併列顯示
 
@@ -131,7 +135,7 @@ GET /api/v1/financial/companies/{ticker}/official-evidence
 - Cloud Run 管理服務
 - Firestore 或其他雲端 DB 保存資料
 - Cloud Scheduler 定期觸發 refresh
-- Secret Manager 管理 OpenAI key 與 ingestion token
+- Secret Manager 管理 Gemini key 與 ingestion token
 
 ## 不做的事
 
@@ -139,3 +143,4 @@ GET /api/v1/financial/companies/{ticker}/official-evidence
 - 不把 FastAPI 全部複製進 Flask `app.py`。
 - 不讓 LLM 直接決定財報數字或投資建議。
 - 不在 Phase 1 就重寫共享前端框架。
+- 不在 Phase 2 改成 OpenAI，除非組內後續重新決定。
