@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 from app.financial_analysis_models import RuleSeverity
 from app.historical_analysis_models import (
@@ -12,7 +13,9 @@ from scripts.smoke_semiconductor_companies import (
     PHASE3_COMPANY_TARGETS,
     REQUIRED_METRICS_BY_SUBINDUSTRY,
     build_company_summary,
+    next_actions_for_company,
     phase3_target_profiles,
+    write_payload,
 )
 
 
@@ -111,7 +114,28 @@ def test_phase3_summary_reports_missing_metrics_and_rule_scopes() -> None:
     )
     summary = build_company_summary(report)
     assert summary["ticker"] == "3711"
+    assert summary["requested_years"] == 3
     assert summary["rule_scope_counts"] == {"packaging_testing": 1}
     assert summary["metric_coverage"]["inventory_growth_yoy"] is True
     assert "operating_cash_flow" in summary["missing_required_metrics"]
+    assert summary["phase3_readiness"] == "needs_mapping_review"
+    assert "補 robust MOPS mapping aliases" in summary["next_actions"][0]
     assert summary["ai_v2"]["enabled"] is False
+
+
+def test_next_actions_for_ready_company_points_to_frontend_demo() -> None:
+    summary = {
+        "ticker": "2330",
+        "available_years": 3,
+        "requested_years": 3,
+        "missing_required_metrics": [],
+        "insufficient_rule_ids": [],
+    }
+    assert "Phase 3 子產業擴充 demo" in next_actions_for_company(summary)[0]
+
+
+def test_write_payload_creates_demo_output_json(tmp_path) -> None:
+    output = tmp_path / "phase3.json"
+    path = write_payload({"result": "PASS", "targets": []}, output)
+    assert path == output
+    assert json.loads(output.read_text(encoding="utf-8"))["result"] == "PASS"
