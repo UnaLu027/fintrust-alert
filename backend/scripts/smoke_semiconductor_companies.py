@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 from app.services.ai_financial_analysis_service import AIFinancialAnalysisService
@@ -12,6 +13,9 @@ from app.services.historical_analysis_service import HistoricalFinancialAnalysis
 # Phase 3 target set requested by the teacher: keep the initial foundry case,
 # add another foundry peer, include IC design, and explicitly cover packaging / testing.
 PHASE3_COMPANY_TARGETS: tuple[str, ...] = ("2330", "2303", "2454", "3711")
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT_PATH = BACKEND_ROOT / "data" / "demo-output" / "phase3-semiconductor-summary.json"
 
 REQUIRED_METRICS_BY_SUBINDUSTRY: dict[str, tuple[str, ...]] = {
     "晶圓代工": (
@@ -90,6 +94,59 @@ def _insufficient_rule_ids(report) -> list[str]:
     ]
 
 
+def _period_mapping_status(report) -> list[dict[str, Any]]:
+    """Expose per-period parsing status so mapping gaps can be fixed next."""
+    return [
+        {
+            "period": period.period,
+            "status": period.status,
+            "fields_found_count": len(period.fields_found),
+            "fields_missing": period.fields_missing,
+            "warnings": period.warnings,
+        }
+        for period in report.periods
+    ]
+
+
+def _phase3_readiness(summary: dict[str, Any]) -> str:
+    if summary.get("status") == "failed":
+        return "failed"
+    if summary["available_years"] < summary["requested_years"]:
+        return "needs_mops_fetch_review"
+    if summary["missing_required_metrics"]:
+        return "needs_mapping_review"
+    if summary["insufficient_rule_ids"]:
+        return "needs_rule_coverage_review"
+    return "ready_for_frontend_snapshot_demo"
+
+
+def next_actions_for_company(summary: dict[str, Any]) -> list[str]:
+    """Turn live smoke gaps into actionable Phase 3 follow-up items."""
+    if summary.get("status") == "failed":
+        return [
+            "先檢查此公司 MOPS 年度 iXBRL 是否可連線與解析，再決定是否需要 demo_fixture 降級展示。"
+        ]
+
+    actions: list[str] = []
+    if summary["available_years"] < summary["requested_years"]:
+        actions.append(
+            "補查無法取得的年度：確認 MOPS 申報是否存在、公司代號是否正確，以及 iXBRL fetch 是否 timeout。"
+        )
+    if summary["missing_required_metrics"]:
+        actions.append(
+            "補 robust MOPS mapping aliases：優先處理缺少的 required metrics，避免子產業規則被資料不足影響。"
+        )
+    if summary["insufficient_rule_ids"]:
+        actions.append(
+            "檢查資料不足規則：確認是財報欄位缺漏、metric 未計算，還是規則條件需要為該子產業調整。"
+        )
+    if not actions:
+        actions.append(
+            "此公司已可作為 Phase 3 子產業擴充 demo 候選；可接到 latest snapshot 或共享 Flask 財報證據卡。"
+        )
+    return actions
+
+
 def build_company_summary(report, ai_report: Any | None = None) -> dict[str, Any]:
     """Convert one historical report into a compact teacher-review summary."""
     payload: dict[str, Any] = {
@@ -97,11 +154,13 @@ def build_company_summary(report, ai_report: Any | None = None) -> dict[str, Any
         "company_name": report.company_name,
         "subindustry": report.subindustry,
         "source_method": report.source_method,
+        "requested_years": report.requested_years,
         "available_years": report.available_years,
         "period_range": {
             "start_year": report.start_year,
             "end_year": report.end_year,
         },
+        "periods": _period_mapping_status(report),
         "overall_severity": report.overall_severity.value,
         "rule_version": report.rule_version,
         "rule_scope_counts": _rule_scope_counts(report),
@@ -124,6 +183,8 @@ def build_company_summary(report, ai_report: Any | None = None) -> dict[str, Any
             "enabled": False,
             "reason": "AI v2 currently applies only to supported subindustries; historical rules still run for this company.",
         }
+    payload["phase3_readiness"] = _phase3_readiness(payload)
+    payload["next_actions"] = next_actions_for_company(payload)
     return payload
 
 
@@ -179,8 +240,24 @@ async def run_smoke(
             results.append(summary)
         except Exception as exc:  # pragma: no cover - live smoke diagnostic path
             failures.append(f"{ticker}: {exc}")
-            results.append({"ticker": ticker, "status": "failed", "error": str(exc)})
+            failed = {
+                "ticker": ticker,
+                "status": "failed",
+                "error": str(exc),
+            }
+            failed["phase3_readiness"] = _phase3_readiness(failed)
+            failed["next_actions"] = next_actions_for_company(failed)
+            results.append(failed)
 
+    next_actions = [
+        {
+            "ticker": item.get("ticker"),
+            "company_name": item.get("company_name"),
+            "phase3_readiness": item.get("phase3_readiness"),
+            "actions": item.get("next_actions", []),
+        }
+        for item in results
+    ]
     payload = {
         "phase": "phase3_semiconductor_subindustry_expansion",
         "teacher_alignment": [
@@ -192,12 +269,22 @@ async def run_smoke(
         "end_year": end_year,
         "targets": phase3_target_profiles(),
         "results": results,
+        "next_actions": next_actions,
         "failures": failures,
         "result": "PASS" if not failures else "WARN" if not strict else "FAIL",
     }
     if strict and failures:
         raise RuntimeError(json.dumps(payload, ensure_ascii=False, indent=2))
     return payload
+
+
+def write_payload(payload: dict[str, Any], output_path: str | Path) -> Path:
+    path = Path(output_path)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def parse_args() -> argparse.Namespace:
@@ -222,6 +309,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit non-zero if any company lacks required metrics or full years.",
     )
+    parser.add_argument(
+        "--output",
+        default=str(DEFAULT_OUTPUT_PATH),
+        help="Write the JSON smoke summary to this path for screenshots and mapping review.",
+    )
+    parser.add_argument(
+        "--no-output",
+        action="store_true",
+        help="Print only; do not write a JSON output artifact.",
+    )
     return parser.parse_args()
 
 
@@ -234,6 +331,9 @@ async def main() -> None:
         use_ai_v2=not args.skip_ai_v2,
         strict=args.strict,
     )
+    if not args.no_output:
+        output_path = write_payload(payload, args.output)
+        payload["output_file"] = str(output_path)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
