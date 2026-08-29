@@ -60,7 +60,10 @@
 交付內容：
 
 - `backend/scripts/smoke_semiconductor_companies.py`
+- `docs/phase3-semiconductor-live-validation.md`
 - `npm run demo:semiconductor`
+- `npm run demo:semiconductor:strict`
+- `backend/data/demo-output/phase3-semiconductor-summary.json`（執行後產生，不提交）
 - `backend/tests/test_phase3_semiconductor_scope.py`
 
 驗收標準：
@@ -68,6 +71,7 @@
 - registry 明確包含 2330、2303、2454、3711。
 - 不同子產業載入對應規則，不誤套 IC design rules。
 - smoke script 能列出 status、available years、missing metrics、rule count、rule scope counts。
+- smoke script 會輸出 `phase3_readiness` 與 `next_actions`，把 live MOPS 缺欄位轉成下一步 mapping 修正清單。
 - 聯發科可額外驗證 deterministic AI v2；晶圓代工與封裝測試先保留 historical subindustry engine。
 
 ## Phase 4：法說會資料管線
