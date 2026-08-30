@@ -22,6 +22,11 @@ from app.models import (
     FactIngestRequest,
     HealthResponse,
 )
+from app.official_event_models import (
+    InvestorConferenceRecord,
+    MaterialEventRecord,
+    OfficialEvidenceSummary,
+)
 from app.pipeline_models import (
     AnalysisRunSummary,
     CompanyRefreshResult,
@@ -42,6 +47,11 @@ from app.services.historical_analysis_service import HistoricalFinancialAnalysis
 from app.services.ingestion_pipeline import FinancialIngestionPipeline
 from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 from app.services.mops_inline_xbrl import MopsInlineXbrlError
+from app.services.official_event_sources import (
+    build_investor_conference_metadata,
+    build_material_event_metadata,
+)
+from app.services.official_evidence_service import OfficialEvidenceService
 from app.services.pipeline_evidence_repository import PipelineEvidenceRepository
 from app.services.twse_openapi import TwseOpenApiError
 from app.services.verifier import verify_claim
@@ -193,6 +203,57 @@ async def analyze_historical_financial_statements(
         ) from exc
 
 
+@router.get(
+    "/companies/{ticker}/conferences",
+    response_model=list[InvestorConferenceRecord],
+)
+def investor_conferences(ticker: str) -> list[InvestorConferenceRecord]:
+    try:
+        return build_investor_conference_metadata(ticker)
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/companies/{ticker}/material-events",
+    response_model=list[MaterialEventRecord],
+)
+def material_events(
+    ticker: str,
+    year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    title: str | None = Query(
+        default=None,
+        description="Optional title for keyword-based event classification during integration tests.",
+    ),
+) -> list[MaterialEventRecord]:
+    try:
+        return build_material_event_metadata(ticker, year=year, title=title)
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/companies/{ticker}/official-evidence",
+    response_model=OfficialEvidenceSummary,
+)
+def official_evidence(
+    ticker: str,
+    include_conferences: bool = Query(default=True),
+    include_material_events: bool = Query(default=True),
+    material_event_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> OfficialEvidenceSummary:
+    try:
+        return OfficialEvidenceService(repository=repository).build(
+            ticker,
+            include_conferences=include_conferences,
+            include_material_events=include_material_events,
+            material_event_year=material_event_year,
+        )
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post(
     "/admin/companies/{ticker}/refresh",
     response_model=CompanyRefreshResult,
@@ -278,61 +339,39 @@ def persisted_metrics(
         if snapshot is None:
             raise HTTPException(status_code=404, detail="尚無已完成的分析快照。")
         selected_run_id = snapshot.analysis_run_id
-    return {
-        "ticker": ticker,
-        "run_id": selected_run_id,
-        "metrics": repository.list_metrics(ticker, limit, selected_run_id),
-    }
+    return repository.list_metrics(ticker, limit=limit, run_id=selected_run_id)
 
 
-@router.get(
-    "/companies/{ticker}/analysis-runs",
-    response_model=list[AnalysisRunSummary],
-)
+@router.get("/companies/{ticker}/analysis-runs", response_model=list[AnalysisRunSummary])
 def analysis_runs(
     ticker: str,
     limit: int = Query(default=20, ge=1, le=100),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> list[AnalysisRunSummary]:
-    return repository.list_runs(ticker, limit)
-
-
-@router.post("/claims/extract")
-def extract(payload: ClaimExtractionRequest):
-    return extract_claim(
-        payload.text,
-        ticker_hint=payload.ticker,
-        period_hint=payload.period,
-        comparison_period_hint=payload.comparison_period,
-    )
-
-
-@router.post("/claims/verify", response_model=ClaimVerificationResult)
-def verify(
-    payload: ClaimVerificationRequest,
-    repository: AnalysisRepository = Depends(get_analysis_repository),
-) -> ClaimVerificationResult:
-    claim = extract_claim(
-        payload.text,
-        ticker_hint=payload.ticker,
-        period_hint=payload.period,
-        comparison_period_hint=payload.comparison_period,
-    )
-    evidence_repository = PipelineEvidenceRepository(repository)
-    return verify_claim(claim, evidence_repository, payload.tolerance_percentage_points)
+    return repository.list_analysis_runs(ticker, limit=limit)
 
 
 @router.post("/facts/ingest")
-def ingest(
-    payload: FactIngestRequest,
+def ingest_fact(
+    request: FactIngestRequest,
     repository: FinancialFactRepository = Depends(get_fact_repository),
 ):
-    inserted = repository.upsert_many(payload.facts)
-    return {
-        "inserted": inserted,
-        "warning": (
-            "Compatibility endpoint only. Normal operation uses the scheduled ingestion pipeline, "
-            "which fetches official data, persists facts, calculates metrics, executes rules and "
-            "updates the frontend snapshot automatically."
-        ),
-    }
+    return repository.upsert_fact(request)
+
+
+@router.post("/claims/extract", response_model=ClaimExtractionRequest)
+def extract_financial_claim(request: ClaimExtractionRequest) -> ClaimExtractionRequest:
+    return extract_claim(request)
+
+
+@router.post("/claims/verify", response_model=ClaimVerificationResult)
+def verify_financial_claim(
+    request: ClaimVerificationRequest,
+    fact_repository: FinancialFactRepository = Depends(get_fact_repository),
+    analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> ClaimVerificationResult:
+    evidence_repository = PipelineEvidenceRepository(
+        fact_repository=fact_repository,
+        analysis_repository=analysis_repository,
+    )
+    return verify_claim(request, evidence_repository=evidence_repository)
