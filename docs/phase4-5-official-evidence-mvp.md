@@ -36,6 +36,12 @@ GET /api/v1/financial/companies/{ticker}/official-evidence
 
 此 API 將年度財報 snapshot、法說會 metadata 與重大訊息 metadata 組合成前端可讀的官方證據包，讓共享 Flask 前端不用自行整合多個來源。
 
+## 來源基礎
+
+- MOPS 法說會常見查詢入口：`t100sb07_1`。
+- MOPS 重大訊息常見查詢入口：`t05st01`。
+- 詳細的資料來源與規則基礎整理在 `docs/official-evidence-sources-and-rules.md`。
+
 ## Demo 指令
 
 ```bash
