@@ -89,33 +89,20 @@ def health() -> HealthResponse:
 
 @router.get("/ai/health")
 def ai_analysis_health():
-    """Expose AI engine, monitorable rule catalog and LLM readiness for demos."""
     return AIFinancialAnalysisService().health(subindustry="IC 設計")
 
 
 @router.get("/ai/rules", response_model=AnalysisRuleCatalogResponse)
 def ai_analysis_rules() -> AnalysisRuleCatalogResponse:
-    """Return the full IC-design rule catalog so each rule can be monitored."""
     return MonitorableFinancialRuleEngine(subindustry="IC 設計").catalog()
 
 
-@router.post(
-    "/ai/companies/{ticker}/analyze",
-    response_model=AIFinancialAnalysisReport,
-)
+@router.post("/ai/companies/{ticker}/analyze", response_model=AIFinancialAnalysisReport)
 async def analyze_company_with_ai(
     ticker: str,
     years: int = Query(default=3, ge=3, le=5),
-    end_year: int | None = Query(
-        default=None,
-        ge=2019,
-        le=datetime.now().year,
-        description="最後一個財報年度（西元年）；未提供時使用最近已完成年度。",
-    ),
-    use_llm: bool = Query(
-        default=True,
-        description="啟用設定好的 LLM 做跨面向整合；未設定時仍會回傳完整 deterministic 分析。",
-    ),
+    end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    use_llm: bool = Query(default=True),
 ) -> AIFinancialAnalysisReport:
     end_roc_year = end_year - 1911 if end_year is not None else None
     try:
@@ -124,29 +111,20 @@ async def analyze_company_with_ai(
             years=years,
             end_roc_year=end_roc_year,
         )
-        return await AIFinancialAnalysisService().analyze_report(
-            historical,
-            use_llm=use_llm,
-        )
+        return await AIFinancialAnalysisService().analyze_report(historical, use_llm=use_llm)
     except UnsupportedCompanyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MopsInlineXbrlError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}",
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}") from exc
 
 
 @router.get("/companies", response_model=CompanyListResponse)
 def companies() -> CompanyListResponse:
     return CompanyListResponse(
         companies=list_companies(),
-        note=(
-            "此為可擴充的半導體公司 seed registry；系統依晶圓代工、IC 設計、"
-            "封裝測試載入共通規則與子產業複合規則。"
-        ),
+        note="此為可擴充的半導體公司 seed registry；系統依晶圓代工、IC 設計、封裝測試載入共通規則與子產業複合規則。",
     )
 
 
@@ -155,58 +133,34 @@ def rules() -> RuleCatalogResponse:
     return FinancialRuleEngine().catalog()
 
 
-@router.get(
-    "/statements/{ticker}/analyze",
-    response_model=FinancialStatementAnalysisReport,
-)
+@router.get("/statements/{ticker}/analyze", response_model=FinancialStatementAnalysisReport)
 async def analyze_financial_statement(ticker: str) -> FinancialStatementAnalysisReport:
     try:
         return await FinancialAnalysisService().analyze(ticker)
     except UnsupportedCompanyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except TwseOpenApiError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"無法取得臺灣證券交易所財報資料：{exc}",
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"無法取得臺灣證券交易所財報資料：{exc}") from exc
 
 
-@router.get(
-    "/statements/{ticker}/history",
-    response_model=HistoricalFinancialAnalysisReport,
-)
+@router.get("/statements/{ticker}/history", response_model=HistoricalFinancialAnalysisReport)
 async def analyze_historical_financial_statements(
     ticker: str,
     years: int = Query(default=5, ge=3, le=5),
-    end_year: int | None = Query(
-        default=None,
-        ge=2019,
-        le=datetime.now().year,
-        description="最後一個財報年度（西元年）；未提供時使用最近已完成年度。",
-    ),
+    end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
 ) -> HistoricalFinancialAnalysisReport:
     end_roc_year = end_year - 1911 if end_year is not None else None
     try:
-        return await HistoricalFinancialAnalysisService().analyze(
-            ticker,
-            years=years,
-            end_roc_year=end_roc_year,
-        )
+        return await HistoricalFinancialAnalysisService().analyze(ticker, years=years, end_roc_year=end_roc_year)
     except UnsupportedCompanyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MopsInlineXbrlError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}",
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"無法取得 MOPS Inline XBRL 歷史財報：{exc}") from exc
 
 
-@router.get(
-    "/companies/{ticker}/conferences",
-    response_model=list[InvestorConferenceRecord],
-)
+@router.get("/companies/{ticker}/conferences", response_model=list[InvestorConferenceRecord])
 def investor_conferences(ticker: str) -> list[InvestorConferenceRecord]:
     try:
         return build_investor_conference_metadata(ticker)
@@ -214,17 +168,11 @@ def investor_conferences(ticker: str) -> list[InvestorConferenceRecord]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get(
-    "/companies/{ticker}/material-events",
-    response_model=list[MaterialEventRecord],
-)
+@router.get("/companies/{ticker}/material-events", response_model=list[MaterialEventRecord])
 def material_events(
     ticker: str,
     year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
-    title: str | None = Query(
-        default=None,
-        description="Optional title for keyword-based event classification during integration tests.",
-    ),
+    title: str | None = Query(default=None),
 ) -> list[MaterialEventRecord]:
     try:
         return build_material_event_metadata(ticker, year=year, title=title)
@@ -232,10 +180,7 @@ def material_events(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get(
-    "/companies/{ticker}/official-evidence",
-    response_model=OfficialEvidenceSummary,
-)
+@router.get("/companies/{ticker}/official-evidence", response_model=OfficialEvidenceSummary)
 def official_evidence(
     ticker: str,
     include_conferences: bool = Query(default=True),
@@ -264,13 +209,7 @@ async def refresh_company_pipeline(
     years: int = Query(default=5, ge=3, le=5),
     end_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
     trigger: Literal["scheduler", "manual", "demo", "startup"] = Query(default="manual"),
-    source_mode: Literal["official", "demo_fixture"] = Query(
-        default="official",
-        description=(
-            "official 會連線 TWSE／MOPS；demo_fixture 僅在外部來源無法連線時驗證流程，"
-            "回傳內容會明確標示為合成資料。"
-        ),
-    ),
+    source_mode: Literal["official", "demo_fixture"] = Query(default="official"),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> CompanyRefreshResult:
     result = await FinancialIngestionPipeline(repository=repository).refresh_company(
@@ -305,20 +244,14 @@ async def refresh_all_company_pipelines(
     )
 
 
-@router.get(
-    "/companies/{ticker}/analysis/latest",
-    response_model=FrontendAnalysisSnapshot,
-)
+@router.get("/companies/{ticker}/analysis/latest", response_model=FrontendAnalysisSnapshot)
 def latest_persisted_analysis(
     ticker: str,
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> FrontendAnalysisSnapshot:
     snapshot = repository.get_latest_snapshot(ticker)
     if snapshot is None:
-        raise HTTPException(
-            status_code=404,
-            detail="尚無已完成的分析快照；請等待排程或由管理端執行 refresh。",
-        )
+        raise HTTPException(status_code=404, detail="尚無已完成的分析快照；請等待排程或由管理端執行 refresh。")
     return snapshot
 
 
@@ -326,11 +259,8 @@ def latest_persisted_analysis(
 def persisted_metrics(
     ticker: str,
     limit: int = Query(default=200, ge=1, le=1000),
-    run_id: str | None = Query(default=None, description="只回傳指定 analysis run 的指標。"),
-    latest_only: bool = Query(
-        default=False,
-        description="自動使用最新 snapshot 的 run_id，避免混入舊分析紀錄。",
-    ),
+    run_id: str | None = Query(default=None),
+    latest_only: bool = Query(default=False),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ):
     selected_run_id = run_id
