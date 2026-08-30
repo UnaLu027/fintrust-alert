@@ -1,11 +1,11 @@
 # Flask Integration Adapter
 
-這個資料夾是給共享 `Financial-Risk-Alert-System` Flask 專案使用的整合包。它的目的不是取代 `fintrust-alert` FastAPI，而是讓共享 Flask 介面可以透過 proxy API 讀取財報分析結果。
+這個資料夾是給共享 `Financial-Risk-Alert-System` Flask 專案使用的整合包。它的目的不是取代 `fintrust-alert` FastAPI，而是讓共享 Flask 介面可以透過 proxy API 讀取財報分析結果與官方事件資料。
 
 ## 為什麼這樣整合
 
 - Flask：統一使用者介面與搜尋結果頁。
-- FastAPI：官方財報資料取得、財報指標計算、規則引擎與 latest snapshot。
+- FastAPI：官方財報資料取得、財報指標計算、規則引擎、法說會 / 重大訊息 metadata 與 latest snapshot。
 - Adapter：讓 Flask 代替瀏覽器呼叫 FastAPI，集中管理 API URL、token 與錯誤處理。
 
 這樣可以回應老師要求的「開始整合、統一介面」，但不需要把兩個不同框架硬合併成一個 `app.py`。
@@ -77,16 +77,26 @@ FINTRUST_INGESTION_TOKEN=<server-side-secret>
 ## 第一階段整合目標
 
 1. 在共享前端顯示「官方財報證據」。
-2. 先接 `analysis/latest`，展示公司、子產業、整體狀態、摘要與關鍵指標。
-3. 後續再接 `analysis-runs` 到分析紀錄頁。
-4. 管理端才允許觸發 `refresh`，一般使用者只讀取快照。
+2. 優先接 `official-evidence`，讓前端一次取得年度財報 snapshot、法說會 metadata 與重大訊息 metadata。
+3. 若還沒有 snapshot，前端仍可顯示法說會與重大訊息查詢入口，並提示需要先執行財報 refresh。
+4. 後續再接 `analysis-runs` 到分析紀錄頁。
+5. 管理端才允許觸發 `refresh`，一般使用者只讀取快照。
+
+## 推薦前端讀取順序
+
+```text
+GET /api/financial/companies/{ticker}/official-evidence
+  ↓ 若 financial_snapshot 存在：顯示財報指標＋官方事件
+  ↓ 若 readiness=needs_refresh：顯示官方事件入口＋提示後端尚未完成財報 refresh
+```
 
 ## 後續擴充
 
 老師要求的資料即時性可逐步加入：
 
-- 法說會 metadata / 文件摘要
-- 重大訊息 metadata / 事件分類
-- `official-evidence` aggregate API
+- 法說會 PDF / HTML / 影音逐字稿摘要
+- 重大訊息歷史公告批次解析
+- Gemini 對官方事件文字做摘要與主張抽取
+- `official-evidence` 逐步從 metadata MVP 升級為正式官方證據包
 
 共享前端最終只需要接一個官方證據包，不必自行整合年度財報、法說會與重大訊息。
