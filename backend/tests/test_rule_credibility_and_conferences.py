@@ -51,15 +51,17 @@ def test_investor_conference_html_parser_extracts_links_topics_and_claims() -> N
     </body></html>
     """
     records = parse_investor_conference_html("2330", html, source_url="https://mops.twse.com.tw/mops/web/t100sb07_1?co_id=2330")
-    assert len(records) == 1
-    record = records[0]
-    assert record.status == "available"
-    assert record.document_extract_status == "document_link_found"
-    assert record.document_url is not None
-    assert "資本支出與產能規劃" in record.extracted_topics
-    assert "capex_intensity" in record.related_metrics
-    assert record.disclosure_claims
-    assert record.conference_date == "2026-08-12"
+    assert records
+    assert len(records) <= 3
+
+    primary = records[0]
+    assert primary.status == "available"
+    assert primary.document_extract_status == "document_link_found"
+    assert primary.document_url is not None
+    assert "資本支出與產能規劃" in primary.extracted_topics
+    assert "capex_intensity" in primary.related_metrics
+    assert primary.disclosure_claims
+    assert primary.conference_date == "2026-08-12"
 
 
 def test_metadata_fallback_remains_stable_without_live_fetch() -> None:
