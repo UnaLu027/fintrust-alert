@@ -161,9 +161,15 @@ async def analyze_historical_financial_statements(
 
 
 @router.get("/companies/{ticker}/conferences", response_model=list[InvestorConferenceRecord])
-def investor_conferences(ticker: str) -> list[InvestorConferenceRecord]:
+def investor_conferences(
+    ticker: str,
+    fetch_live: bool = Query(
+        default=False,
+        description="True 時嘗試讀取 MOPS 法說會頁面並解析 HTML preview / 附件連結；預設 False 以保持 demo 穩定。",
+    ),
+) -> list[InvestorConferenceRecord]:
     try:
-        return build_investor_conference_metadata(ticker)
+        return build_investor_conference_metadata(ticker, fetch_live=fetch_live)
     except UnsupportedCompanyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -185,6 +191,10 @@ def official_evidence(
     ticker: str,
     include_conferences: bool = Query(default=True),
     include_material_events: bool = Query(default=True),
+    fetch_conference_live: bool = Query(
+        default=False,
+        description="True 時嘗試以 live MOPS HTML preview 補強法說會 metadata；失敗時回到可解釋 limitation。",
+    ),
     material_event_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> OfficialEvidenceSummary:
@@ -193,6 +203,7 @@ def official_evidence(
             ticker,
             include_conferences=include_conferences,
             include_material_events=include_material_events,
+            fetch_conference_live=fetch_conference_live,
             material_event_year=material_event_year,
         )
     except UnsupportedCompanyError as exc:
@@ -258,22 +269,16 @@ def latest_persisted_analysis(
 @router.get("/companies/{ticker}/metrics")
 def persisted_metrics(
     ticker: str,
-    limit: int = Query(default=200, ge=1, le=1000),
-    run_id: str | None = Query(default=None),
-    latest_only: bool = Query(default=False),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    latest_only: bool = Query(default=True),
     repository: AnalysisRepository = Depends(get_analysis_repository),
 ):
-    selected_run_id = run_id
-    if latest_only:
-        snapshot = repository.get_latest_snapshot(ticker)
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="尚無已完成的分析快照。")
-        selected_run_id = snapshot.analysis_run_id
-    return repository.list_metrics(ticker, limit=limit, run_id=selected_run_id)
+    metrics = repository.list_metrics(ticker, limit=limit, latest_only=latest_only)
+    return {"ticker": ticker, "latest_only": latest_only, "count": len(metrics), "metrics": metrics}
 
 
 @router.get("/companies/{ticker}/analysis-runs", response_model=list[AnalysisRunSummary])
-def analysis_runs(
+def persisted_analysis_runs(
     ticker: str,
     limit: int = Query(default=20, ge=1, le=100),
     repository: AnalysisRepository = Depends(get_analysis_repository),
@@ -281,27 +286,21 @@ def analysis_runs(
     return repository.list_analysis_runs(ticker, limit=limit)
 
 
-@router.post("/facts/ingest")
-def ingest_fact(
-    request: FactIngestRequest,
-    repository: FinancialFactRepository = Depends(get_fact_repository),
-):
-    return repository.upsert_fact(request)
+@router.post("/facts/ingest", dependencies=[Depends(require_ingestion_token)])
+def ingest_fact(request: FactIngestRequest, repository: FinancialFactRepository = Depends(get_fact_repository)):
+    fact = repository.upsert_fact(request)
+    return {"status": "ok", "fact": fact}
 
 
-@router.post("/claims/extract", response_model=ClaimExtractionRequest)
-def extract_financial_claim(request: ClaimExtractionRequest) -> ClaimExtractionRequest:
-    return extract_claim(request)
+@router.post("/claims/extract", response_model=ClaimVerificationResult)
+def extract_financial_claim(request: ClaimExtractionRequest) -> ClaimVerificationResult:
+    claim = extract_claim(request.text, ticker_hint=request.ticker_hint)
+    return ClaimVerificationResult(claim=claim, verdict="not_verified", evidence=[], explanation="已完成主張抽取，尚未進行官方資料比對。")
 
 
 @router.post("/claims/verify", response_model=ClaimVerificationResult)
 def verify_financial_claim(
     request: ClaimVerificationRequest,
-    fact_repository: FinancialFactRepository = Depends(get_fact_repository),
-    analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
+    repository: PipelineEvidenceRepository = Depends(lambda: PipelineEvidenceRepository()),
 ) -> ClaimVerificationResult:
-    evidence_repository = PipelineEvidenceRepository(
-        fact_repository=fact_repository,
-        analysis_repository=analysis_repository,
-    )
-    return verify_claim(request, evidence_repository=evidence_repository)
+    return verify_claim(request.claim, repository=repository)
