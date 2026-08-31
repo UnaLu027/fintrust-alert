@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 OfficialEvidenceType = Literal["financial_snapshot", "investor_conference", "material_event"]
@@ -12,6 +12,14 @@ OfficialEvidenceSourceStatus = Literal[
     "metadata_only",
     "needs_manual_review",
     "missing",
+    "error",
+]
+OfficialDocumentExtractStatus = Literal[
+    "not_attempted",
+    "metadata_only",
+    "html_preview",
+    "document_link_found",
+    "text_extracted",
     "error",
 ]
 MaterialEventCategory = Literal[
@@ -26,6 +34,15 @@ MaterialEventCategory = Literal[
     "governance",
     "other",
 ]
+OfficialClaimType = Literal[
+    "outlook",
+    "capacity_or_capex",
+    "inventory_or_demand",
+    "revenue_or_orders",
+    "rd_or_product",
+    "cash_flow_or_financing",
+    "other",
+]
 
 
 class OfficialSourceLink(BaseModel):
@@ -34,6 +51,17 @@ class OfficialSourceLink(BaseModel):
     status: OfficialEvidenceSourceStatus = "metadata_only"
     retrieved_at: datetime | None = None
     limitation: str | None = None
+
+
+class OfficialDisclosureClaim(BaseModel):
+    """A conservative, source-grounded claim extracted from an official disclosure."""
+
+    claim_type: OfficialClaimType = "other"
+    text: str
+    related_metrics: list[str] = Field(default_factory=list)
+    evidence_source: str
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    limitations: list[str] = Field(default_factory=list)
 
 
 class InvestorConferenceRecord(BaseModel):
@@ -49,8 +77,14 @@ class InvestorConferenceRecord(BaseModel):
     document_url: str | None = None
     video_url: str | None = None
     status: OfficialEvidenceSourceStatus = "metadata_only"
+    document_extract_status: OfficialDocumentExtractStatus = "metadata_only"
+    document_title: str | None = None
+    document_text_preview: str | None = None
+    document_text_length: int | None = None
+    source_evidence: list[str] = Field(default_factory=list)
     extracted_topics: list[str] = Field(default_factory=list)
     related_metrics: list[str] = Field(default_factory=list)
+    disclosure_claims: list[OfficialDisclosureClaim] = Field(default_factory=list)
     summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
 
@@ -69,6 +103,7 @@ class MaterialEventRecord(BaseModel):
     related_metrics: list[str] = Field(default_factory=list)
     risk_related: bool = False
     summary: str | None = None
+    disclosure_claims: list[OfficialDisclosureClaim] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
 
