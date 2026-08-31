@@ -67,7 +67,21 @@ class HistoricalFinancialRuleEngine:
         return sorted(metric.period_values.items())
 
     @staticmethod
+    def _rule_metadata(rule: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "credibility_level": rule.get("credibility_level", "mvp_heuristic"),
+            "calibration_status": rule.get("calibration_status", "mvp_threshold"),
+            "evidence_basis": rule.get("evidence_basis"),
+            "evidence_references": list(rule.get("evidence_references", [])),
+            "llm_interpretation_guardrail": rule.get(
+                "llm_interpretation_guardrail",
+                "LLM may summarize and connect this rule with official evidence, but may not change the deterministic verdict or invent missing financial values.",
+            ),
+        }
+
+    @classmethod
     def _result(
+        cls,
         rule: dict[str, Any],
         severity: RuleSeverity,
         explanation: str,
@@ -94,6 +108,7 @@ class HistoricalFinancialRuleEngine:
             rule_scope=str(rule.get("rule_scope", "semiconductor_common")),
             logic_expression=rule.get("logic_expression"),
             actual_values=actual_values or {},
+            **cls._rule_metadata(rule),
         )
 
     def _insufficient(self, rule: dict[str, Any], message: str) -> HistoricalRuleResult:
@@ -219,10 +234,14 @@ class HistoricalFinancialRuleEngine:
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 存貨年增 {left_value:.2f}%，營收年增 {right_value:.2f}%，差距 {gap:.2f} 個百分點。{rule['rationale']}",
-                        f"差距 ≥ {thresholds['attention']} 個百分點；高關注 ≥ {thresholds['high']} 個百分點",
+                        f"{latest_period} {left.label} 與 {right.label} 差距為 {gap:.2f} 個百分點。{rule['rationale']}",
+                        f"差距 ≥ {thresholds['attention']} 個百分點需注意；≥ {thresholds['high']} 高關注",
                         [latest_period],
-                        actual_values={left.code: left_value, right.code: right_value, "gap": gap},
+                        actual_values={
+                            "left_value": left_value,
+                            "right_value": right_value,
+                            "gap_percentage_points": gap,
+                        },
                     )
                 )
                 continue
@@ -235,19 +254,17 @@ class HistoricalFinancialRuleEngine:
                 if not common:
                     results.append(self._insufficient(rule, "淨利率與營業現金流沒有共同年度。"))
                     continue
-                latest_period = common[-1]
-                profit_value = net_values[latest_period]
-                ocf_value = ocf_values[latest_period]
-                triggered = profit_value > 0 and ocf_value < 0
-                severity = RuleSeverity.HIGH_ATTENTION if triggered else RuleSeverity.NORMAL
+                latest = common[-1]
+                condition = net_values[latest] > 0 and ocf_values[latest] < 0
+                severity = RuleSeverity.ATTENTION if condition else RuleSeverity.NORMAL
                 results.append(
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 淨利率 {profit_value:.2f}%，營業活動現金流 {ocf_value:,.0f} 新台幣仟元。{rule['rationale']}",
-                        "淨利率 > 0 且營業活動現金流 < 0",
-                        [latest_period],
-                        actual_values={net_margin.code: profit_value, ocf.code: ocf_value},
+                        f"{latest} 淨利率 {net_values[latest]:.2f}%、營業現金流 {ocf_values[latest]:,.0f}{ocf.unit}。{rule['rationale']}",
+                        "淨利率為正但營業現金流為負",
+                        [latest],
+                        actual_values={"net_margin": net_values[latest], "operating_cash_flow": ocf_values[latest]},
                     )
                 )
                 continue
@@ -258,46 +275,11 @@ class HistoricalFinancialRuleEngine:
                 if not values:
                     results.append(self._insufficient(rule, "缺少自由現金流資料。"))
                     continue
-                latest = values[-1]
-                latest_negative = latest[1] < 0
-                two_negative = len(values) >= 2 and all(value < 0 for _, value in values[-2:])
-                severity = (
-                    RuleSeverity.HIGH_ATTENTION
-                    if two_negative
-                    else RuleSeverity.ATTENTION
-                    if latest_negative
-                    else RuleSeverity.NORMAL
-                )
-                periods_used = [period for period, _ in values[-2:]]
-                results.append(
-                    self._result(
-                        rule,
-                        severity,
-                        f"最近自由現金流為 {latest[1]:,.0f} 新台幣仟元。{rule['rationale']}",
-                        "最新年度為負列需注意；連續兩年為負列高關注",
-                        periods_used,
-                        actual_values={period: value for period, value in values[-2:]},
-                    )
-                )
-                continue
-
-            if operator == "latest_above_median_with_negative":
-                capex, fcf = required
-                capex_values = self._values(capex)
-                fcf_values = dict(self._values(fcf))
-                common = sorted(set(dict(capex_values)) & set(fcf_values))
-                if len(capex_values) < 3 or not common:
-                    results.append(self._insufficient(rule, "至少需要三年資本支出強度及自由現金流。"))
-                    continue
-                latest_period = common[-1]
-                latest_capex = dict(capex_values)[latest_period]
-                latest_fcf = fcf_values[latest_period]
-                historical = [value for period, value in capex_values if period != latest_period]
-                baseline = median(historical) if historical else latest_capex
-                gap = latest_capex - baseline
-                if latest_fcf < 0 and gap >= float(thresholds["high_gap"]):
+                latest_period, latest_value = values[-1]
+                latest_two = values[-2:]
+                if len(latest_two) >= 2 and all(value < 0 for _, value in latest_two):
                     severity = RuleSeverity.HIGH_ATTENTION
-                elif latest_fcf < 0 and gap >= float(thresholds["attention_gap"]):
+                elif latest_value < 0:
                     severity = RuleSeverity.ATTENTION
                 else:
                     severity = RuleSeverity.NORMAL
@@ -305,10 +287,50 @@ class HistoricalFinancialRuleEngine:
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 資本支出占營收比 {latest_capex:.2f}%，較先前年度中位數高 {gap:.2f} 個百分點；自由現金流 {latest_fcf:,.0f} 新台幣仟元。{rule['rationale']}",
-                        f"自由現金流為負且高於歷史中位數 {thresholds['attention_gap']} 個百分點；高關注 {thresholds['high_gap']} 個百分點",
+                        f"最新年度 {latest_period} 自由現金流 {latest_value:,.0f}{metric.unit}。{rule['rationale']}",
+                        "單年度為負需注意；連續兩年為負提高關注",
+                        [period for period, _ in latest_two],
+                        actual_values={period: value for period, value in latest_two},
+                    )
+                )
+                continue
+
+            if operator == "latest_above_median_with_negative":
+                ratio_metric, cash_metric = required
+                ratio_values = self._values(ratio_metric)
+                cash_values = dict(self._values(cash_metric))
+                if len(ratio_values) < 2:
+                    results.append(self._insufficient(rule, "至少需要兩年以上資本支出強度資料。"))
+                    continue
+                latest_period, latest_ratio = ratio_values[-1]
+                historical_baseline = median(value for _, value in ratio_values[:-1])
+                gap = latest_ratio - historical_baseline
+                cash_value = cash_values.get(latest_period)
+                if cash_value is None:
+                    results.append(self._insufficient(rule, "缺少同年度自由現金流資料。"))
+                    continue
+                if gap >= float(thresholds["high_gap"]) and cash_value < 0:
+                    severity = RuleSeverity.HIGH_ATTENTION
+                elif gap >= float(thresholds["attention_gap"]) and cash_value < 0:
+                    severity = RuleSeverity.ATTENTION
+                else:
+                    severity = RuleSeverity.NORMAL
+                results.append(
+                    self._result(
+                        rule,
+                        severity,
+                        (
+                            f"{latest_period} {ratio_metric.label} {latest_ratio:.2f}{ratio_metric.unit}，"
+                            f"較歷史中位數高 {gap:.2f} 個百分點；自由現金流 {cash_value:,.0f}{cash_metric.unit}。{rule['rationale']}"
+                        ),
+                        f"高於歷史中位數 {thresholds['attention_gap']} 個百分點且自由現金流為負需注意",
                         [latest_period],
-                        actual_values={capex.code: latest_capex, fcf.code: latest_fcf, "historical_median": baseline, "gap": gap},
+                        actual_values={
+                            "latest_ratio": latest_ratio,
+                            "historical_median": historical_baseline,
+                            "gap_percentage_points": gap,
+                            "free_cash_flow": cash_value,
+                        },
                     )
                 )
                 continue
@@ -317,14 +339,14 @@ class HistoricalFinancialRuleEngine:
                 metric = required[0]
                 values = self._values(metric)
                 if len(values) < 2:
-                    results.append(self._insufficient(rule, "至少需要兩年負債比。"))
+                    results.append(self._insufficient(rule, "至少需要兩年資料計算水準與變化。"))
                     continue
-                latest_period, latest = values[-1]
-                previous = values[-2][1]
-                change = latest - previous
-                if latest >= float(thresholds["level_high"]) and change >= float(thresholds["change_attention"]):
+                previous_period, previous_value = values[-2]
+                latest_period, latest_value = values[-1]
+                change = latest_value - previous_value
+                if latest_value >= float(thresholds["level_high"]) and change >= float(thresholds["change_attention"]):
                     severity = RuleSeverity.HIGH_ATTENTION
-                elif latest >= float(thresholds["level_attention"]) and change >= float(thresholds["change_attention"]):
+                elif latest_value >= float(thresholds["level_attention"]) and change >= float(thresholds["change_attention"]):
                     severity = RuleSeverity.ATTENTION
                 else:
                     severity = RuleSeverity.NORMAL
@@ -332,31 +354,38 @@ class HistoricalFinancialRuleEngine:
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 負債比 {latest:.2f}%，較前一年度增加 {change:.2f} 個百分點。{rule['rationale']}",
-                        f"負債比 ≥ {thresholds['level_attention']}% 且增加 ≥ {thresholds['change_attention']} 個百分點",
-                        [values[-2][0], latest_period],
-                        actual_values={"latest": latest, "previous": previous, "change_percentage_points": change},
+                        f"{latest_period} {metric.label} {latest_value:.2f}{metric.unit}，較 {previous_period} 變化 {change:.2f} 個百分點。{rule['rationale']}",
+                        f"水準 ≥ {thresholds['level_attention']} 且增加 ≥ {thresholds['change_attention']} 個百分點需注意",
+                        [previous_period, latest_period],
+                        actual_values={
+                            "latest_value": latest_value,
+                            "previous_value": previous_value,
+                            "change_percentage_points": change,
+                        },
                     )
                 )
                 continue
 
             if operator == "informational_trend":
                 metric = required[0]
-                change = metric.change_percentage_points
-                if change is None:
-                    results.append(self._insufficient(rule, "缺少兩年研發強度資料。"))
+                values = self._values(metric)
+                if not values:
+                    results.append(self._insufficient(rule, "缺少研發投入資料。"))
                     continue
-                material = abs(change) >= float(thresholds["material_change"])
-                severity = RuleSeverity.POSITIVE if material and change > 0 else RuleSeverity.NORMAL
-                direction = "增加" if change > 0 else "下降" if change < 0 else "持平"
+                latest_period, latest_value = values[-1]
+                change = metric.change_percentage_points
+                explanation = f"{latest_period} {metric.label} {latest_value:.2f}{metric.unit}。"
+                if change is not None:
+                    explanation += f"較前期變化 {change:.2f} 個百分點。"
+                explanation += rule["rationale"]
                 results.append(
                     self._result(
                         rule,
-                        severity,
-                        f"研發費用占營收比較前一年度{direction} {abs(change):.2f} 個百分點。{rule['rationale']}",
-                        f"變化絕對值 ≥ {thresholds['material_change']} 個百分點列為重大趨勢觀察",
-                        [period for period, _ in self._values(metric)[-2:]],
-                        actual_values={"change_percentage_points": change},
+                        RuleSeverity.NORMAL,
+                        explanation,
+                        "資訊性趨勢，不直接列為風險",
+                        [period for period, _ in values[-2:]],
+                        actual_values={"latest_value": latest_value, "change_percentage_points": change},
                     )
                 )
                 continue
@@ -365,121 +394,131 @@ class HistoricalFinancialRuleEngine:
                 capex, fcf, gross_margin = required
                 capex_values = self._values(capex)
                 fcf_values = dict(self._values(fcf))
-                gross_values = self._values(gross_margin)
-                common = sorted(set(dict(capex_values)) & set(fcf_values) & set(dict(gross_values)))
-                if len(capex_values) < 3 or len(gross_values) < 2 or not common:
-                    results.append(self._insufficient(rule, "至少需要三年資本支出與兩年毛利率資料。"))
-                    continue
-                latest_period = common[-1]
-                latest_capex = dict(capex_values)[latest_period]
-                latest_fcf = fcf_values[latest_period]
-                baseline_values = [value for period, value in capex_values if period != latest_period]
-                baseline = median(baseline_values)
-                capex_gap = latest_capex - baseline
                 margin_change = gross_margin.change_percentage_points
-                if margin_change is None:
-                    results.append(self._insufficient(rule, "缺少毛利率百分點變化。"))
+                if len(capex_values) < 2 or margin_change is None:
+                    results.append(self._insufficient(rule, "缺少晶圓代工資本支出或毛利率變化資料。"))
                     continue
-                high = (
+                latest_period, latest_capex = capex_values[-1]
+                capex_baseline = median(value for _, value in capex_values[:-1])
+                capex_gap = latest_capex - capex_baseline
+                fcf_latest = fcf_values.get(latest_period)
+                if fcf_latest is None:
+                    results.append(self._insufficient(rule, "缺少同年度自由現金流資料。"))
+                    continue
+                high_condition = (
                     capex_gap >= float(thresholds["high_capex_gap"])
-                    and latest_fcf < 0
+                    and fcf_latest < 0
                     and margin_change <= float(thresholds["high_margin_drop"])
                 )
-                attention = (
+                attention_condition = (
                     capex_gap >= float(thresholds["attention_capex_gap"])
-                    and latest_fcf < 0
+                    and fcf_latest < 0
                     and margin_change <= float(thresholds["attention_margin_drop"])
                 )
-                severity = RuleSeverity.HIGH_ATTENTION if high else RuleSeverity.ATTENTION if attention else RuleSeverity.NORMAL
+                severity = RuleSeverity.HIGH_ATTENTION if high_condition else RuleSeverity.ATTENTION if attention_condition else RuleSeverity.NORMAL
                 results.append(
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 資本支出強度較歷史中位數高 {capex_gap:.2f} 個百分點，自由現金流 {latest_fcf:,.0f} 新台幣仟元，毛利率變化 {margin_change:.2f} 個百分點。{rule['rationale']}",
-                        "資本支出高於歷史基準＋自由現金流為負＋毛利率下滑",
-                        [period for period, _ in gross_values[-2:]],
-                        actual_values={"capex_intensity": latest_capex, "capex_historical_median": baseline, "capex_gap": capex_gap, "free_cash_flow": latest_fcf, "gross_margin_change_pp": margin_change},
+                        f"{latest_period} 資本支出強度較自身歷史中位數高 {capex_gap:.2f} 個百分點，自由現金流 {fcf_latest:,.0f}{fcf.unit}，毛利率變化 {margin_change:.2f} 個百分點。{rule['rationale']}",
+                        "資本支出高於自身歷史基準，且自由現金流為負、毛利率同步下滑",
+                        [latest_period],
+                        actual_values={
+                            "capex_gap_percentage_points": capex_gap,
+                            "free_cash_flow": fcf_latest,
+                            "gross_margin_change_percentage_points": margin_change,
+                        },
                     )
                 )
                 continue
 
             if operator == "ic_design_rd_conversion_pressure":
                 rd, revenue_growth, inventory_growth, cash_conversion = required
-                rd_change = rd.change_percentage_points
-                revenue_values = self._values(revenue_growth)
-                inventory_values = dict(self._values(inventory_growth))
-                cash_values = dict(self._values(cash_conversion))
-                common = sorted(set(dict(revenue_values)) & set(inventory_values) & set(cash_values))
-                if rd_change is None or not common:
-                    results.append(self._insufficient(rule, "缺少研發強度變化或共同年度營收、存貨與現金轉換資料。"))
+                common = sorted(
+                    set(rd.period_values)
+                    & set(revenue_growth.period_values)
+                    & set(inventory_growth.period_values)
+                    & set(cash_conversion.period_values)
+                )
+                if not common or rd.change_percentage_points is None:
+                    results.append(self._insufficient(rule, "缺少 IC 設計研發、營收、存貨或現金轉換資料。"))
                     continue
-                latest_period = common[-1]
-                revenue_value = dict(revenue_values)[latest_period]
-                inventory_value = inventory_values[latest_period]
-                cash_value = cash_values[latest_period]
-                inventory_gap = inventory_value - revenue_value
-                high = (
+                latest = common[-1]
+                inventory_gap = inventory_growth.period_values[latest] - revenue_growth.period_values[latest]
+                cash_value = cash_conversion.period_values[latest]
+                rd_change = rd.change_percentage_points
+                high_condition = (
                     rd_change >= float(thresholds["rd_change_min"])
-                    and revenue_value < 0
+                    and revenue_growth.period_values[latest] < 0
                     and inventory_gap >= float(thresholds["high_inventory_gap"])
                     and cash_value < float(thresholds["high_cash_conversion_max"])
                 )
-                attention = (
+                attention_condition = (
                     rd_change >= float(thresholds["rd_change_min"])
-                    and revenue_value < 0
+                    and revenue_growth.period_values[latest] < 0
                     and inventory_gap >= float(thresholds["attention_inventory_gap"])
                     and cash_value < float(thresholds["attention_cash_conversion_max"])
                 )
-                severity = RuleSeverity.HIGH_ATTENTION if high else RuleSeverity.ATTENTION if attention else RuleSeverity.NORMAL
+                severity = RuleSeverity.HIGH_ATTENTION if high_condition else RuleSeverity.ATTENTION if attention_condition else RuleSeverity.NORMAL
                 results.append(
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 研發強度變化 {rd_change:.2f} 個百分點、營收年增 {revenue_value:.2f}%、存貨年增 {inventory_value:.2f}%（差距 {inventory_gap:.2f} 個百分點）、現金轉換比 {cash_value:.2f} 倍。{rule['rationale']}",
-                        "研發強度未下降＋營收衰退＋存貨增速高於營收＋現金轉換偏弱",
-                        [latest_period],
-                        actual_values={"rd_intensity_change_pp": rd_change, "revenue_growth_yoy": revenue_value, "inventory_growth_yoy": inventory_value, "inventory_revenue_gap": inventory_gap, "cash_conversion_ratio": cash_value},
+                        f"{latest} 研發強度變化 {rd_change:.2f} 個百分點、營收年增率 {revenue_growth.period_values[latest]:.2f}%、存貨與營收成長差距 {inventory_gap:.2f} 個百分點、現金轉換比 {cash_value:.2f}。{rule['rationale']}",
+                        "研發強度提高時，若營收下滑、存貨增速明顯高於營收且現金轉換偏弱，才提高關注",
+                        [latest],
+                        actual_values={
+                            "rd_intensity_change_percentage_points": rd_change,
+                            "revenue_growth_yoy": revenue_growth.period_values[latest],
+                            "inventory_revenue_gap_percentage_points": inventory_gap,
+                            "cash_conversion_ratio": cash_value,
+                        },
                     )
                 )
                 continue
 
             if operator == "packaging_working_capital_pressure":
                 inventory_growth, revenue_growth, ocf, debt_ratio = required
-                inventory_values = dict(self._values(inventory_growth))
-                revenue_values = dict(self._values(revenue_growth))
-                common = sorted(set(inventory_values) & set(revenue_values))
-                if not common or ocf.change_percent is None or debt_ratio.change_percentage_points is None:
-                    results.append(self._insufficient(rule, "缺少共同年度存貨、營收、現金流或負債比變化資料。"))
+                common = sorted(
+                    set(inventory_growth.period_values)
+                    & set(revenue_growth.period_values)
+                    & set(ocf.period_values)
+                    & set(debt_ratio.period_values)
+                )
+                if len(common) < 2:
+                    results.append(self._insufficient(rule, "封裝測試規則至少需要兩年共同資料。"))
                     continue
-                latest_period = common[-1]
-                inventory_value = inventory_values[latest_period]
-                revenue_value = revenue_values[latest_period]
-                inventory_gap = inventory_value - revenue_value
-                ocf_change = ocf.change_percent
-                debt_change = debt_ratio.change_percentage_points
-                high = (
+                previous, latest = common[-2], common[-1]
+                inventory_gap = inventory_growth.period_values[latest] - revenue_growth.period_values[latest]
+                ocf_change = ocf.period_values[latest] - ocf.period_values[previous]
+                debt_change = debt_ratio.period_values[latest] - debt_ratio.period_values[previous]
+                high_condition = (
                     inventory_gap >= float(thresholds["high_inventory_gap"])
                     and ocf_change < 0
                     and debt_change >= float(thresholds["high_debt_change"])
                 )
-                attention = (
+                attention_condition = (
                     inventory_gap >= float(thresholds["attention_inventory_gap"])
                     and ocf_change < 0
                     and debt_change >= float(thresholds["attention_debt_change"])
                 )
-                severity = RuleSeverity.HIGH_ATTENTION if high else RuleSeverity.ATTENTION if attention else RuleSeverity.NORMAL
+                severity = RuleSeverity.HIGH_ATTENTION if high_condition else RuleSeverity.ATTENTION if attention_condition else RuleSeverity.NORMAL
                 results.append(
                     self._result(
                         rule,
                         severity,
-                        f"{latest_period} 存貨與營收成長差距 {inventory_gap:.2f} 個百分點、營業現金流變化 {ocf_change:.2f}%、負債比變化 {debt_change:.2f} 個百分點。{rule['rationale']}",
-                        "存貨增速高於營收＋營業現金流下降＋負債比上升",
-                        [latest_period],
-                        actual_values={"inventory_growth_yoy": inventory_value, "revenue_growth_yoy": revenue_value, "inventory_revenue_gap": inventory_gap, "operating_cash_flow_change_percent": ocf_change, "debt_ratio_change_pp": debt_change},
+                        f"{latest} 存貨與營收成長差距 {inventory_gap:.2f} 個百分點，營業現金流較前期變化 {ocf_change:,.0f}{ocf.unit}，負債比變化 {debt_change:.2f} 個百分點。{rule['rationale']}",
+                        "存貨相對營收壓力、營業現金流惡化與負債比上升同步出現才提高關注",
+                        [previous, latest],
+                        actual_values={
+                            "inventory_revenue_gap_percentage_points": inventory_gap,
+                            "operating_cash_flow_change": ocf_change,
+                            "debt_ratio_change_percentage_points": debt_change,
+                        },
                     )
                 )
                 continue
 
-            raise ValueError(f"Unsupported historical rule operator: {operator}")
+            results.append(self._insufficient(rule, f"尚未支援的規則運算子：{operator}"))
 
         return results
