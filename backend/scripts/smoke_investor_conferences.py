@@ -9,22 +9,44 @@ from app.services.official_event_sources import build_investor_conference_metada
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_PATH = BACKEND_ROOT / "data" / "demo-output" / "investor-conference-summary.json"
+DEFAULT_DEBUG_DIR = BACKEND_ROOT / "data" / "demo-output" / "mops-conference-debug"
 
 
-def build_payload(*, tickers: list[str], fetch_live: bool) -> dict[str, Any]:
+def _load_debug_summary(ticker: str, debug_dir: Path) -> dict[str, Any] | None:
+    path = debug_dir / f"mops-conference-{ticker}-debug.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        return {"error": f"Unable to read debug summary: {exc}", "debug_summary_file": str(path)}
+
+
+def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path | None = None) -> dict[str, Any]:
     results = []
     failures = []
+    debug_path = Path(debug_dir) if debug_dir is not None else DEFAULT_DEBUG_DIR
     for ticker in tickers:
         try:
-            records = build_investor_conference_metadata(ticker, fetch_live=fetch_live)
+            records = build_investor_conference_metadata(
+                ticker,
+                fetch_live=fetch_live,
+                debug_dir=debug_path if fetch_live else None,
+            )
+            debug_summary = _load_debug_summary(ticker, debug_path) if fetch_live else None
             results.append(
                 {
                     "ticker": ticker,
+                    "company_name": records[0].company_name if records else None,
+                    "subindustry": records[0].subindustry if records else None,
                     "record_count": len(records),
                     "records": [record.model_dump(mode="json") for record in records],
                     "status": "available" if any(record.status == "available" for record in records) else "metadata_only",
                     "document_links_found": [record.document_url for record in records if record.document_url],
+                    "document_extract_statuses": [record.document_extract_status for record in records],
+                    "text_preview_count": sum(1 for record in records if record.document_text_preview),
                     "claim_count": sum(len(record.disclosure_claims) for record in records),
+                    "live_debug": debug_summary,
                 }
             )
         except Exception as exc:  # pragma: no cover - live smoke diagnostic path
@@ -33,6 +55,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool) -> dict[str, Any]:
     return {
         "phase": "phase4_investor_conference_content_mvp",
         "fetch_live": fetch_live,
+        "debug_dir": str(debug_path) if fetch_live else None,
         "teacher_alignment": [
             "年度財報之外，開始讀取法說會 metadata / HTML preview / 附件連結",
             "法說會只作為官方文字證據，不覆蓋 deterministic 財報規則結果",
@@ -56,7 +79,8 @@ def write_payload(payload: dict[str, Any], output_path: str | Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Phase 4 investor conference smoke.")
     parser.add_argument("--tickers", nargs="+", default=["2330", "2303", "2454", "3711"])
-    parser.add_argument("--fetch-live", action="store_true", help="Attempt live MOPS HTML fetch. Default keeps metadata-only stable demo.")
+    parser.add_argument("--fetch-live", action="store_true", help="Attempt live MOPS HTML fetch and save parser debug artifacts.")
+    parser.add_argument("--debug-dir", default=str(DEFAULT_DEBUG_DIR), help="Directory for sanitized live MOPS HTML/debug artifacts.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--no-output", action="store_true")
     return parser.parse_args()
@@ -64,7 +88,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    payload = build_payload(tickers=[str(ticker) for ticker in args.tickers], fetch_live=args.fetch_live)
+    payload = build_payload(
+        tickers=[str(ticker) for ticker in args.tickers],
+        fetch_live=args.fetch_live,
+        debug_dir=args.debug_dir,
+    )
     if not args.no_output:
         output_path = write_payload(payload, args.output)
         payload["output_file"] = str(output_path)
