@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.official_company_ir_sources import build_official_ir_fallback_metadata
+from app.services.official_document_extraction import enrich_conferences_with_document_extraction
 from app.services.official_event_sources import build_investor_conference_metadata
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +28,13 @@ def _records_are_available(records: list) -> bool:
     return any(getattr(record, "status", None) == "available" for record in records)
 
 
-def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path | None = None) -> dict[str, Any]:
+def build_payload(
+    *,
+    tickers: list[str],
+    fetch_live: bool,
+    extract_documents: bool = False,
+    debug_dir: str | Path | None = None,
+) -> dict[str, Any]:
     results = []
     failures = []
     debug_path = Path(debug_dir) if debug_dir is not None else DEFAULT_DEBUG_DIR
@@ -52,6 +59,15 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                     records = fallback_records
                     fallback_used = True
                     fallback_source = "official_company_ir"
+
+            document_debug = None
+            document_results = []
+            if extract_documents and _records_are_available(records):
+                records, document_results, document_debug = enrich_conferences_with_document_extraction(
+                    records,
+                    debug_dir=debug_path,
+                )
+
             results.append(
                 {
                     "ticker": ticker,
@@ -64,6 +80,10 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                     "document_extract_statuses": [record.document_extract_status for record in records],
                     "text_preview_count": sum(1 for record in records if record.document_text_preview),
                     "claim_count": sum(len(record.disclosure_claims) for record in records),
+                    "document_extraction_count": len(document_results),
+                    "text_extracted_count": sum(1 for item in document_results if item.extract_status == "text_extracted"),
+                    "download_failed_count": sum(1 for item in document_results if item.extract_status == "download_failed"),
+                    "document_blocked_count": sum(1 for item in document_results if item.extract_status == "blocked_by_source"),
                     "mops_status": "available" if _records_are_available(mops_records) else "metadata_only",
                     "fallback_used": fallback_used,
                     "fallback_source": fallback_source,
@@ -71,6 +91,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                     "blocked_by_source": bool((official_ir_debug or {}).get("blocked_by_source")),
                     "live_debug": debug_summary,
                     "official_ir_debug": official_ir_debug,
+                    "document_debug": document_debug,
                 }
             )
         except Exception as exc:  # pragma: no cover - live smoke diagnostic path
@@ -79,11 +100,13 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
     return {
         "phase": "phase4_investor_conference_content_mvp",
         "fetch_live": fetch_live,
+        "extract_documents": extract_documents,
         "debug_dir": str(debug_path) if fetch_live else None,
         "teacher_alignment": [
             "年度財報之外，開始讀取法說會 metadata / HTML preview / 附件連結",
             "MOPS 法說會仍是優先來源；若 MOPS 回 shell/no-data，Phase 4 會暫用公司官方 IR 頁面作 fallback",
             "若公司官方 IR 於 Codespaces 回 403，改用 source-labelled search-index fallback，不把 blocked source 假裝成 live fetch 成功",
+            "文件抽取層會嘗試下載 PDF / transcript / HTML，失敗時保留 download_failed 或 blocked_by_source debug，不阻斷整體 demo",
             "法說會只作為官方文字證據，不覆蓋 deterministic 財報規則結果",
             "Gemini 後續可針對 disclosure_claims 與財報指標做 evidence-grounded 摘要",
         ],
@@ -106,6 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Phase 4 investor conference smoke.")
     parser.add_argument("--tickers", nargs="+", default=["2330", "2303", "2454", "3711"])
     parser.add_argument("--fetch-live", action="store_true", help="Attempt live MOPS HTML fetch and save parser debug artifacts.")
+    parser.add_argument("--extract-documents", action="store_true", help="Attempt document/PDF/transcript extraction for discovered official links.")
     parser.add_argument("--debug-dir", default=str(DEFAULT_DEBUG_DIR), help="Directory for sanitized live MOPS HTML/debug artifacts.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--no-output", action="store_true")
@@ -117,6 +141,7 @@ def main() -> None:
     payload = build_payload(
         tickers=[str(ticker) for ticker in args.tickers],
         fetch_live=args.fetch_live,
+        extract_documents=args.extract_documents,
         debug_dir=args.debug_dir,
     )
     if not args.no_output:
