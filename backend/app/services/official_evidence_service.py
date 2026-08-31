@@ -35,6 +35,7 @@ class OfficialEvidenceService:
         *,
         include_conferences: bool = True,
         include_material_events: bool = True,
+        fetch_conference_live: bool = False,
         material_event_year: int | None = None,
     ) -> OfficialEvidenceSummary:
         company = get_company(ticker)
@@ -43,7 +44,11 @@ class OfficialEvidenceService:
 
         snapshot_obj = self.repository.get_latest_snapshot(company.ticker) if self.repository else None
         snapshot = _model_to_dict(snapshot_obj)
-        conferences = build_investor_conference_metadata(company.ticker) if include_conferences else []
+        conferences = (
+            build_investor_conference_metadata(company.ticker, fetch_live=fetch_conference_live)
+            if include_conferences
+            else []
+        )
         material_events = (
             build_material_event_metadata(company.ticker, year=material_event_year)
             if include_material_events
@@ -77,9 +82,13 @@ class OfficialEvidenceService:
             sources.extend(
                 OfficialSourceLink(
                     source_name=item.source_name,
-                    source_url=item.source_url,
+                    source_url=item.document_url or item.source_url,
                     status=item.status,
-                    limitation="Phase 4 metadata MVP；尚未解析附件全文。",
+                    limitation=(
+                        "已偵測法說會附件或頁面文字 preview；PDF / 影音全文解析仍在後續階段。"
+                        if item.status == "available"
+                        else "Phase 4 metadata MVP；尚未解析附件全文。"
+                    ),
                 )
                 for item in conferences
             )
@@ -107,7 +116,11 @@ class OfficialEvidenceService:
         if snapshot is not None:
             summary_parts.append("已納入年度財報 latest snapshot 作為官方量化證據。")
         if conferences:
-            summary_parts.append("已預留法說會 metadata 層，用於補充近期展望、產能、庫存與需求訊息。")
+            parsed_count = sum(1 for item in conferences if item.status == "available")
+            if parsed_count:
+                summary_parts.append("已偵測法說會頁面文字或附件連結，可補充近期展望、產能、庫存與需求訊息。")
+            else:
+                summary_parts.append("已預留法說會 metadata 層，用於補充近期展望、產能、庫存與需求訊息。")
         if material_events:
             summary_parts.append("已預留重大訊息 metadata 與事件分類層，用於補充更即時的官方事件。")
         if not summary_parts:
