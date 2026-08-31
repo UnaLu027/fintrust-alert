@@ -32,8 +32,9 @@ class FinTrustClient:
     """HTTP client used by Flask proxy routes.
 
     The browser should call Flask routes, not the FastAPI service directly.
-    This keeps API URLs, ingestion tokens and future OpenAI settings on the
-    server side.
+    This keeps API URLs, ingestion tokens and future LLM settings on the server
+    side. It also keeps the private Flask frontend independent from backend
+    implementation details.
     """
 
     base_url: str | None = None
@@ -114,8 +115,46 @@ class FinTrustClient:
         except Exception:  # pragma: no cover - best effort error detail only
             return None
 
+    def health(self) -> Any:
+        return self.request("GET", "/api/v1/financial/health")
+
+    def companies(self) -> Any:
+        return self.request("GET", "/api/v1/financial/companies")
+
     def latest_analysis(self, ticker: str) -> Any:
         return self.request("GET", f"/api/v1/financial/companies/{ticker}/analysis/latest")
+
+    def official_evidence(
+        self,
+        ticker: str,
+        *,
+        fetch_conference_live: bool = False,
+        include_conferences: bool = True,
+        include_material_events: bool = True,
+    ) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/financial/companies/{ticker}/official-evidence",
+            params={
+                "fetch_conference_live": str(fetch_conference_live).lower(),
+                "include_conferences": str(include_conferences).lower(),
+                "include_material_events": str(include_material_events).lower(),
+            },
+        )
+
+    def conferences(self, ticker: str, *, fetch_live: bool = False) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/financial/companies/{ticker}/conferences",
+            params={"fetch_live": str(fetch_live).lower()},
+        )
+
+    def material_events(self, ticker: str, *, year: int | None = None, title: str | None = None) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/financial/companies/{ticker}/material-events",
+            params={"year": year, "title": title},
+        )
 
     def metrics(self, ticker: str, *, latest_only: bool = True, limit: int = 1000) -> Any:
         return self.request(
@@ -147,3 +186,58 @@ class FinTrustClient:
             },
             include_ingestion_token=True,
         )
+
+
+def safe_financial_payload(ticker: str, *, fetch_conference_live: bool = False) -> dict[str, Any]:
+    """Return a Flask-template-safe payload with partial failure handling."""
+    client = FinTrustClient()
+    payload: dict[str, Any] = {
+        "ticker": ticker,
+        "snapshot": None,
+        "official_evidence": None,
+        "conferences": [],
+        "material_events": [],
+        "errors": [],
+    }
+    calls = [
+        ("snapshot", lambda: client.latest_analysis(ticker)),
+        ("official_evidence", lambda: client.official_evidence(ticker, fetch_conference_live=fetch_conference_live)),
+        ("conferences", lambda: client.conferences(ticker, fetch_live=fetch_conference_live)),
+        ("material_events", lambda: client.material_events(ticker)),
+    ]
+    for key, call in calls:
+        try:
+            payload[key] = call()
+        except FinTrustClientError as exc:
+            payload["errors"].append({"layer": key, "message": str(exc), "status_code": exc.status_code, "detail": exc.detail})
+    return payload
+
+
+def frontend_card_payload(ticker: str, *, fetch_conference_live: bool = False) -> dict[str, Any]:
+    """Build a compact payload for dashboard/detail cards.
+
+    This keeps the private Flask templates simple while preserving source status,
+    limitations and evidence layers for the detailed page.
+    """
+    payload = safe_financial_payload(ticker, fetch_conference_live=fetch_conference_live)
+    snapshot = payload.get("snapshot") or {}
+    evidence = payload.get("official_evidence") or {}
+    conferences = payload.get("conferences") or []
+    material_events = payload.get("material_events") or []
+    return {
+        "ticker": ticker,
+        "company_name": snapshot.get("company_name") or evidence.get("company_name"),
+        "subindustry": snapshot.get("subindustry") or evidence.get("subindustry"),
+        "overall_severity": snapshot.get("overall_severity"),
+        "summary": snapshot.get("summary"),
+        "key_metrics": snapshot.get("key_metrics", [])[:6],
+        "rule_cards": snapshot.get("rule_cards", [])[:8],
+        "evidence_readiness": evidence.get("readiness"),
+        "evidence_layers": evidence.get("evidence_layers", []),
+        "official_sources": evidence.get("sources", []),
+        "conference_count": len(conferences),
+        "material_event_count": len(material_events),
+        "limitations": (snapshot.get("limitations") or []) + (evidence.get("limitations") or []),
+        "errors": payload.get("errors", []),
+        "raw": payload,
+    }
