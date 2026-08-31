@@ -60,13 +60,15 @@ def create_financial_blueprint(client: FinTrustClient | None = None):
     @blueprint.get("/api/financial/companies/<ticker>/card")
     def frontend_card(ticker: str):
         live = request.args.get("live", "false").lower() == "true"
-        payload = frontend_card_payload(ticker, fetch_conference_live=live)
+        extract = request.args.get("extract", "false").lower() == "true"
+        payload = frontend_card_payload(ticker, fetch_conference_live=live, extract_documents=extract)
         return to_response({"success": not bool(payload.get("errors")), "data": payload}, 207 if payload.get("errors") else 200)
 
     @blueprint.get("/api/financial/companies/<ticker>/raw")
     def raw_layers(ticker: str):
         live = request.args.get("live", "false").lower() == "true"
-        payload = safe_financial_payload(ticker, fetch_conference_live=live)
+        extract = request.args.get("extract", "false").lower() == "true"
+        payload = safe_financial_payload(ticker, fetch_conference_live=live, extract_documents=extract)
         return to_response({"success": not bool(payload.get("errors")), "data": payload}, 207 if payload.get("errors") else 200)
 
     @blueprint.get("/api/financial/companies/<ticker>/analysis/latest")
@@ -84,11 +86,46 @@ def create_financial_blueprint(client: FinTrustClient | None = None):
         except FinTrustClientError as exc:
             return handle_error(exc)
 
+    @blueprint.get("/api/financial/companies/<ticker>/official-evidence-card")
+    def official_evidence_card(ticker: str):
+        try:
+            live = request.args.get("live", "false").lower() == "true"
+            extract = request.args.get("extract", "false").lower() == "true"
+            return to_response({"success": True, "data": get_client().official_evidence_card(ticker, fetch_conference_live=live, extract_documents=extract)})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
     @blueprint.get("/api/financial/companies/<ticker>/conferences")
     def conferences(ticker: str):
         try:
             live = request.args.get("live", "false").lower() == "true"
             return to_response({"success": True, "data": get_client().conferences(ticker, fetch_live=live)})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies/<ticker>/conference-documents")
+    def conference_documents(ticker: str):
+        try:
+            live = request.args.get("live", "true").lower() != "false"
+            return to_response({"success": True, "data": get_client().conference_documents(ticker, fetch_live=live)})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.post("/api/financial/official-documents/extract")
+    def extract_official_document():
+        try:
+            payload = request.get_json(silent=True) or {}
+            return to_response(
+                {
+                    "success": True,
+                    "data": get_client().extract_official_document(
+                        str(payload.get("ticker", "")),
+                        str(payload.get("document_url", "")),
+                        source_url=payload.get("source_url"),
+                        document_title=payload.get("document_title"),
+                    ),
+                }
+            )
         except FinTrustClientError as exc:
             return handle_error(exc)
 
