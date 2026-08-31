@@ -7,6 +7,7 @@ from app.services.official_event_sources import (
     classify_material_event,
     investor_conference_query_url,
     material_event_query_url,
+    parse_investor_conference_html,
 )
 from app.services.official_evidence_service import OfficialEvidenceService
 
@@ -56,6 +57,32 @@ def test_investor_conference_metadata_is_subindustry_aware() -> None:
     assert "operating_cash_flow" in record.related_metrics
     assert record.status == "metadata_only"
     assert record.source_url.startswith("https://mops.twse.com.tw/mops/web/t100sb07_1")
+
+
+def test_investor_conference_table_parser_extracts_links_and_claims() -> None:
+    html = """
+    <html><body>
+      <table>
+        <tr><th>公司</th><th>日期</th><th>主旨</th><th>附件</th></tr>
+        <tr>
+          <td>2330 台積電</td>
+          <td>114/08/20</td>
+          <td>本公司法人說明會說明資本支出、產能、庫存與營運展望</td>
+          <td><a href="/mops/web/download/presentation.pdf">中文法說會簡報</a></td>
+        </tr>
+      </table>
+    </body></html>
+    """
+    records = parse_investor_conference_html("2330", html, source_url="https://mops.twse.com.tw/mops/web/t100sb07_1")
+    assert len(records) == 1
+    record = records[0]
+    assert record.status == "available"
+    assert record.document_extract_status == "document_link_found"
+    assert record.document_url is not None
+    assert record.document_url.endswith("presentation.pdf")
+    assert record.conference_date == "2025-08-20"
+    assert len(record.disclosure_claims) >= 2
+    assert "capex_intensity" in record.related_metrics
 
 
 def test_material_event_classification_maps_to_financial_metrics() -> None:
