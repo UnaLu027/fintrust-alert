@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,7 @@ OfficialEvidenceSourceStatus = Literal[
     "metadata_only",
     "needs_manual_review",
     "missing",
+    "blocked_by_source",
     "error",
 ]
 OfficialDocumentExtractStatus = Literal[
@@ -20,7 +21,20 @@ OfficialDocumentExtractStatus = Literal[
     "html_preview",
     "document_link_found",
     "text_extracted",
+    "download_failed",
+    "blocked_by_source",
+    "unsupported",
+    "seeded_index",
     "error",
+]
+OfficialDocumentKind = Literal[
+    "html",
+    "pdf",
+    "presentation",
+    "spreadsheet",
+    "transcript",
+    "video",
+    "unknown",
 ]
 MaterialEventCategory = Literal[
     "financial_outlook",
@@ -64,6 +78,39 @@ class OfficialDisclosureClaim(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class OfficialDocumentExtractionRequest(BaseModel):
+    ticker: str
+    document_url: str
+    source_url: str | None = None
+    document_title: str | None = None
+    source_name: str = "官方揭露文件"
+    max_preview_chars: int = Field(default=1800, ge=200, le=6000)
+
+
+class OfficialDocumentExtractionResult(BaseModel):
+    ticker: str
+    company_name: str
+    subindustry: str
+    source_name: str
+    source_url: str
+    document_url: str
+    document_title: str | None = None
+    document_kind: OfficialDocumentKind = "unknown"
+    status: OfficialEvidenceSourceStatus = "metadata_only"
+    extract_status: OfficialDocumentExtractStatus = "not_attempted"
+    content_type: str | None = None
+    final_url: str | None = None
+    http_status: int | None = None
+    text_preview: str | None = None
+    text_length: int | None = None
+    related_metrics: list[str] = Field(default_factory=list)
+    disclosure_claims: list[OfficialDisclosureClaim] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    error: str | None = None
+    debug: dict[str, Any] = Field(default_factory=dict)
+    retrieved_at: datetime | None = None
+
+
 class InvestorConferenceRecord(BaseModel):
     ticker: str
     company_name: str
@@ -85,6 +132,7 @@ class InvestorConferenceRecord(BaseModel):
     extracted_topics: list[str] = Field(default_factory=list)
     related_metrics: list[str] = Field(default_factory=list)
     disclosure_claims: list[OfficialDisclosureClaim] = Field(default_factory=list)
+    document_extractions: list[OfficialDocumentExtractionResult] = Field(default_factory=list)
     summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
 
@@ -125,3 +173,25 @@ class OfficialEvidenceSummary(BaseModel):
     ]
     limitations: list[str] = Field(default_factory=list)
     sources: list[OfficialSourceLink] = Field(default_factory=list)
+
+
+class OfficialEvidenceCardResponse(BaseModel):
+    schema_version: str = "frontend-official-evidence-card-1.0.0"
+    ticker: str
+    company_name: str
+    subindustry: str
+    generated_at: datetime
+    evidence_readiness: str
+    overall_severity: str | None = None
+    headline: str
+    summary: str
+    financial_snapshot: dict | None = None
+    key_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    rule_cards: list[dict[str, Any]] = Field(default_factory=list)
+    investor_conferences: list[dict[str, Any]] = Field(default_factory=list)
+    material_events: list[dict[str, Any]] = Field(default_factory=list)
+    disclosure_claims: list[dict[str, Any]] = Field(default_factory=list)
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    source_status: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    frontend_hints: dict[str, Any] = Field(default_factory=dict)
