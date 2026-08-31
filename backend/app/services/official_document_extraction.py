@@ -114,7 +114,7 @@ class OfficialDocumentExtractionService:
             raise ValueError("Unsupported company for official document extraction.")
 
         source_url = request_payload.source_url or request_payload.document_url
-        kind = infer_document_kind(request_payload.document_url, request_payload.document_title)
+        initial_kind = infer_document_kind(request_payload.document_url, request_payload.document_title)
         now = datetime.now(timezone.utc)
         base_kwargs = {
             "ticker": company.ticker,
@@ -124,7 +124,6 @@ class OfficialDocumentExtractionService:
             "source_url": source_url,
             "document_url": request_payload.document_url,
             "document_title": request_payload.document_title,
-            "document_kind": kind,
             "retrieved_at": now,
         }
         req = Request(
@@ -145,6 +144,7 @@ class OfficialDocumentExtractionService:
             status, extract_status = _source_status_from_error(exc)
             return OfficialDocumentExtractionResult(
                 **base_kwargs,
+                document_kind=initial_kind,
                 status=status,
                 extract_status=extract_status,
                 http_status=getattr(exc, "code", None),
