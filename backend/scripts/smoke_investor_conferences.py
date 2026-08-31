@@ -42,6 +42,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
             debug_summary = _load_debug_summary(ticker, debug_path) if fetch_live else None
             official_ir_debug = None
             fallback_used = False
+            fallback_source = None
             if fetch_live and not _records_are_available(records):
                 fallback_records, official_ir_debug = build_official_ir_fallback_metadata(
                     ticker,
@@ -50,6 +51,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                 if _records_are_available(fallback_records):
                     records = fallback_records
                     fallback_used = True
+                    fallback_source = "official_company_ir"
             results.append(
                 {
                     "ticker": ticker,
@@ -64,7 +66,9 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                     "claim_count": sum(len(record.disclosure_claims) for record in records),
                     "mops_status": "available" if _records_are_available(mops_records) else "metadata_only",
                     "fallback_used": fallback_used,
-                    "fallback_source": "official_company_ir" if fallback_used else None,
+                    "fallback_source": fallback_source,
+                    "fallback_mode": (official_ir_debug or {}).get("fallback_mode") if fallback_used else None,
+                    "blocked_by_source": bool((official_ir_debug or {}).get("blocked_by_source")),
                     "live_debug": debug_summary,
                     "official_ir_debug": official_ir_debug,
                 }
@@ -79,6 +83,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
         "teacher_alignment": [
             "年度財報之外，開始讀取法說會 metadata / HTML preview / 附件連結",
             "MOPS 法說會仍是優先來源；若 MOPS 回 shell/no-data，Phase 4 會暫用公司官方 IR 頁面作 fallback",
+            "若公司官方 IR 於 Codespaces 回 403，改用 source-labelled search-index fallback，不把 blocked source 假裝成 live fetch 成功",
             "法說會只作為官方文字證據，不覆蓋 deterministic 財報規則結果",
             "Gemini 後續可針對 disclosure_claims 與財報指標做 evidence-grounded 摘要",
         ],
