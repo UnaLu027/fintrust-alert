@@ -142,11 +142,53 @@ class FinTrustClient:
             },
         )
 
+    def official_evidence_card(
+        self,
+        ticker: str,
+        *,
+        fetch_conference_live: bool = False,
+        extract_documents: bool = False,
+    ) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/financial/companies/{ticker}/official-evidence-card",
+            params={
+                "fetch_conference_live": str(fetch_conference_live).lower(),
+                "extract_documents": str(extract_documents).lower(),
+            },
+        )
+
     def conferences(self, ticker: str, *, fetch_live: bool = False) -> Any:
         return self.request(
             "GET",
             f"/api/v1/financial/companies/{ticker}/conferences",
             params={"fetch_live": str(fetch_live).lower()},
+        )
+
+    def conference_documents(self, ticker: str, *, fetch_live: bool = True) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/financial/companies/{ticker}/conference-documents",
+            params={"fetch_live": str(fetch_live).lower()},
+        )
+
+    def extract_official_document(
+        self,
+        ticker: str,
+        document_url: str,
+        *,
+        source_url: str | None = None,
+        document_title: str | None = None,
+    ) -> Any:
+        return self.request(
+            "POST",
+            "/api/v1/financial/official-documents/extract",
+            json_body={
+                "ticker": ticker,
+                "document_url": document_url,
+                "source_url": source_url,
+                "document_title": document_title,
+            },
         )
 
     def material_events(self, ticker: str, *, year: int | None = None, title: str | None = None) -> Any:
@@ -188,23 +230,28 @@ class FinTrustClient:
         )
 
 
-def safe_financial_payload(ticker: str, *, fetch_conference_live: bool = False) -> dict[str, Any]:
+def safe_financial_payload(ticker: str, *, fetch_conference_live: bool = False, extract_documents: bool = False) -> dict[str, Any]:
     """Return a Flask-template-safe payload with partial failure handling."""
     client = FinTrustClient()
     payload: dict[str, Any] = {
         "ticker": ticker,
         "snapshot": None,
         "official_evidence": None,
+        "official_evidence_card": None,
         "conferences": [],
+        "conference_documents": [],
         "material_events": [],
         "errors": [],
     }
     calls = [
         ("snapshot", lambda: client.latest_analysis(ticker)),
         ("official_evidence", lambda: client.official_evidence(ticker, fetch_conference_live=fetch_conference_live)),
+        ("official_evidence_card", lambda: client.official_evidence_card(ticker, fetch_conference_live=fetch_conference_live, extract_documents=extract_documents)),
         ("conferences", lambda: client.conferences(ticker, fetch_live=fetch_conference_live)),
         ("material_events", lambda: client.material_events(ticker)),
     ]
+    if extract_documents:
+        calls.append(("conference_documents", lambda: client.conference_documents(ticker, fetch_live=fetch_conference_live)))
     for key, call in calls:
         try:
             payload[key] = call()
@@ -213,13 +260,16 @@ def safe_financial_payload(ticker: str, *, fetch_conference_live: bool = False) 
     return payload
 
 
-def frontend_card_payload(ticker: str, *, fetch_conference_live: bool = False) -> dict[str, Any]:
-    """Build a compact payload for dashboard/detail cards.
+def frontend_card_payload(ticker: str, *, fetch_conference_live: bool = False, extract_documents: bool = False) -> dict[str, Any]:
+    """Build a compact payload for dashboard/detail cards."""
+    payload = safe_financial_payload(ticker, fetch_conference_live=fetch_conference_live, extract_documents=extract_documents)
+    backend_card = payload.get("official_evidence_card")
+    if isinstance(backend_card, dict):
+        backend_card = dict(backend_card)
+        backend_card["errors"] = payload.get("errors", [])
+        backend_card["raw"] = payload
+        return backend_card
 
-    This keeps the private Flask templates simple while preserving source status,
-    limitations and evidence layers for the detailed page.
-    """
-    payload = safe_financial_payload(ticker, fetch_conference_live=fetch_conference_live)
     snapshot = payload.get("snapshot") or {}
     evidence = payload.get("official_evidence") or {}
     conferences = payload.get("conferences") or []
