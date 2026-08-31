@@ -27,13 +27,21 @@ LIVE_DEBUG_LIMIT = 1200
 # form parameters are being tuned.
 OFFICIAL_IR_FALLBACK_URLS: dict[str, list[str]] = {
     "2330": [
+        "https://investor.tsmc.com/english/quarterly-results/2026/q2",
+        "https://investor.tsmc.com/english/quarterly-results/2026/q1",
+        "https://investor.tsmc.com/chinese/quarterly-results/2026/q2",
+        "https://investor.tsmc.com/chinese/quarterly-results/2026/q1",
         "https://investor.tsmc.com/english",
-        "https://investor.tsmc.com/english/financial-calendar",
         "https://pr.tsmc.com/english/events/investor-meetings",
     ],
     "2303": [
-        "https://www.umc.com/en/IR_Event/ir_events",
+        "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q2",
+        "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q1",
+        "https://www.umc.com/zh-TW/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q2",
+        "https://www.umc.com/zh-TW/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q1",
         "https://www.umc.com/en/IR/ir_overview",
+        "https://www.umc.com/zh-TW/IR/ir_overview",
+        "https://www.umc.com/en/IR_Event/ir_events",
     ],
     "2454": [
         "https://www.mediatek.com/investor-relations/financial-information",
@@ -50,11 +58,14 @@ IR_KEYWORDS = (
     "investor conference",
     "earnings conference",
     "conference call",
+    "presentation material",
     "presentation",
     "transcript",
     "webcast",
     "financial results",
     "quarterly results",
+    "quarterly_results",
+    "財務暨營運報告說明會",
     "法人說明會",
     "法說會",
     "簡報",
@@ -92,7 +103,7 @@ def _score_official_ir_html(html: str, company_name: str) -> int:
     if company_name and company_name.casefold() in lowered:
         score += 30
     score += sum(25 for keyword in IR_KEYWORDS if keyword.casefold() in lowered)
-    if any(ext in lowered for ext in (".pdf", "ppt", "download", "presentation")):
+    if any(ext in lowered for ext in (".pdf", "ppt", "download", "presentation", "transcript", "quarterly_results")):
         score += 35
     return score
 
@@ -134,7 +145,8 @@ def _preview_record_from_ir_page(
     topics = infer_conference_topics(text, company.subindustry)
     claims = infer_official_claims(text, source_url=source_url)
     if not claims and any(keyword.casefold() in text.casefold() for keyword in IR_KEYWORDS):
-        # Keep this as a broad 'other' claim so Gemini/rules cannot overstate it.
+        # Keep this bounded: enough to show an official IR conference/result page exists,
+        # but not enough for final judgement without PDF/transcript extraction.
         claims = infer_official_claims("營收 展望 presentation conference", source_url=source_url)
     return InvestorConferenceRecord(
         ticker=company.ticker,
