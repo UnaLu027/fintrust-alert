@@ -78,9 +78,10 @@ FINTRUST_INGESTION_TOKEN=<server-side-secret>
 
 1. 在共享前端顯示「官方財報證據」。
 2. 優先接 `official-evidence`，讓前端一次取得年度財報 snapshot、法說會 metadata 與重大訊息 metadata。
-3. 若還沒有 snapshot，前端仍可顯示法說會與重大訊息查詢入口，並提示需要先執行財報 refresh。
-4. 後續再接 `analysis-runs` 到分析紀錄頁。
-5. 管理端才允許觸發 `refresh`，一般使用者只讀取快照。
+3. 保留 `analysis/latest` 作為第一版財報快照 fallback，若 official-evidence 尚未完成可先讀取 latest snapshot。
+4. 若還沒有 snapshot，前端仍可顯示法說會與重大訊息查詢入口，並提示需要先執行財報 refresh。
+5. 後續再接 `analysis-runs` 到分析紀錄頁。
+6. 管理端才允許觸發 `refresh`，一般使用者只讀取快照。
 
 ## 推薦前端讀取順序
 
@@ -88,6 +89,7 @@ FINTRUST_INGESTION_TOKEN=<server-side-secret>
 GET /api/financial/companies/{ticker}/official-evidence
   ↓ 若 financial_snapshot 存在：顯示財報指標＋官方事件
   ↓ 若 readiness=needs_refresh：顯示官方事件入口＋提示後端尚未完成財報 refresh
+  ↓ 若 official-evidence 尚未接上：fallback GET /api/financial/companies/{ticker}/analysis/latest
 ```
 
 ## 後續擴充
