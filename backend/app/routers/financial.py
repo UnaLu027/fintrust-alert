@@ -25,6 +25,9 @@ from app.models import (
 from app.official_event_models import (
     InvestorConferenceRecord,
     MaterialEventRecord,
+    OfficialDocumentExtractionRequest,
+    OfficialDocumentExtractionResult,
+    OfficialEvidenceCardResponse,
     OfficialEvidenceSummary,
 )
 from app.pipeline_models import (
@@ -47,6 +50,11 @@ from app.services.historical_analysis_service import HistoricalFinancialAnalysis
 from app.services.ingestion_pipeline import FinancialIngestionPipeline
 from app.services.monitorable_rule_engine import MonitorableFinancialRuleEngine
 from app.services.mops_inline_xbrl import MopsInlineXbrlError
+from app.services.official_document_extraction import (
+    OfficialDocumentExtractionService,
+    enrich_conferences_with_document_extraction,
+)
+from app.services.official_evidence_cards import OfficialEvidenceCardBuilder
 from app.services.official_event_sources import (
     build_investor_conference_metadata,
     build_material_event_metadata,
@@ -174,6 +182,27 @@ def investor_conferences(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/companies/{ticker}/conference-documents", response_model=list[OfficialDocumentExtractionResult])
+def investor_conference_documents(
+    ticker: str,
+    fetch_live: bool = Query(default=True),
+) -> list[OfficialDocumentExtractionResult]:
+    try:
+        conferences = build_investor_conference_metadata(ticker, fetch_live=fetch_live)
+        _enriched, results, _debug = enrich_conferences_with_document_extraction(conferences)
+        return results
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/official-documents/extract", response_model=OfficialDocumentExtractionResult)
+def extract_official_document(request: OfficialDocumentExtractionRequest) -> OfficialDocumentExtractionResult:
+    try:
+        return OfficialDocumentExtractionService().extract(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/companies/{ticker}/material-events", response_model=list[MaterialEventRecord])
 def material_events(
     ticker: str,
@@ -204,6 +233,29 @@ def official_evidence(
             include_conferences=include_conferences,
             include_material_events=include_material_events,
             fetch_conference_live=fetch_conference_live,
+            material_event_year=material_event_year,
+        )
+    except UnsupportedCompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/companies/{ticker}/official-evidence-card", response_model=OfficialEvidenceCardResponse)
+def official_evidence_card(
+    ticker: str,
+    include_conferences: bool = Query(default=True),
+    include_material_events: bool = Query(default=True),
+    fetch_conference_live: bool = Query(default=False),
+    extract_documents: bool = Query(default=False),
+    material_event_year: int | None = Query(default=None, ge=2019, le=datetime.now().year),
+    repository: AnalysisRepository = Depends(get_analysis_repository),
+) -> OfficialEvidenceCardResponse:
+    try:
+        return OfficialEvidenceCardBuilder(repository=repository).build(
+            ticker,
+            include_conferences=include_conferences,
+            include_material_events=include_material_events,
+            fetch_conference_live=fetch_conference_live,
+            extract_documents=extract_documents,
             material_event_year=material_event_year,
         )
     except UnsupportedCompanyError as exc:
