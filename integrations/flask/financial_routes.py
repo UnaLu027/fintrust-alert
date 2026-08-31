@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fintrust_client import FinTrustClient, FinTrustClientError
+from fintrust_client import FinTrustClient, FinTrustClientError, frontend_card_payload, safe_financial_payload
 
 
 def create_financial_blueprint(client: FinTrustClient | None = None):
@@ -43,12 +43,64 @@ def create_financial_blueprint(client: FinTrustClient | None = None):
             status,
         )
 
+    @blueprint.get("/api/financial/health")
+    def health():
+        try:
+            return to_response({"success": True, "data": get_client().health()})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies")
+    def companies():
+        try:
+            return to_response({"success": True, "data": get_client().companies()})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies/<ticker>/card")
+    def frontend_card(ticker: str):
+        live = request.args.get("live", "false").lower() == "true"
+        payload = frontend_card_payload(ticker, fetch_conference_live=live)
+        return to_response({"success": not bool(payload.get("errors")), "data": payload}, 207 if payload.get("errors") else 200)
+
+    @blueprint.get("/api/financial/companies/<ticker>/raw")
+    def raw_layers(ticker: str):
+        live = request.args.get("live", "false").lower() == "true"
+        payload = safe_financial_payload(ticker, fetch_conference_live=live)
+        return to_response({"success": not bool(payload.get("errors")), "data": payload}, 207 if payload.get("errors") else 200)
+
     @blueprint.get("/api/financial/companies/<ticker>/analysis/latest")
     def latest_analysis(ticker: str):
         try:
             return to_response({"success": True, "data": get_client().latest_analysis(ticker)})
         except FinTrustClientError as exc:
             return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies/<ticker>/official-evidence")
+    def official_evidence(ticker: str):
+        try:
+            live = request.args.get("live", "false").lower() == "true"
+            return to_response({"success": True, "data": get_client().official_evidence(ticker, fetch_conference_live=live)})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies/<ticker>/conferences")
+    def conferences(ticker: str):
+        try:
+            live = request.args.get("live", "false").lower() == "true"
+            return to_response({"success": True, "data": get_client().conferences(ticker, fetch_live=live)})
+        except FinTrustClientError as exc:
+            return handle_error(exc)
+
+    @blueprint.get("/api/financial/companies/<ticker>/material-events")
+    def material_events(ticker: str):
+        try:
+            year = request.args.get("year")
+            return to_response({"success": True, "data": get_client().material_events(ticker, year=int(year) if year else None)})
+        except (ValueError, FinTrustClientError) as exc:
+            if isinstance(exc, FinTrustClientError):
+                return handle_error(exc)
+            return to_response({"success": False, "error": "Invalid year parameter."}, 400)
 
     @blueprint.get("/api/financial/companies/<ticker>/metrics")
     def metrics(ticker: str):
@@ -77,13 +129,14 @@ def create_financial_blueprint(client: FinTrustClient | None = None):
     def refresh_company(ticker: str):
         try:
             payload = request.get_json(silent=True) or {}
+            end_year = payload.get("end_year") or request.args.get("end_year")
             return to_response(
                 {
                     "success": True,
                     "data": get_client().refresh_company(
                         ticker,
                         years=int(payload.get("years", request.args.get("years", 3))),
-                        end_year=payload.get("end_year") or request.args.get("end_year"),
+                        end_year=int(end_year) if end_year else None,
                         trigger=payload.get("trigger", request.args.get("trigger", "manual")),
                         source_mode=payload.get("source_mode", request.args.get("source_mode", "official")),
                     ),
