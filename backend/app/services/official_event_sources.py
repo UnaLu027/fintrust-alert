@@ -88,8 +88,7 @@ def _extract_first_date(text: str) -> str | None:
 
 
 def _preview_text(text: str, *, limit: int = 800) -> str:
-    cleaned = _strip_tags(text)
-    return cleaned[:limit]
+    return _strip_tags(text)[:limit]
 
 
 def _current_roc_year() -> int:
@@ -119,9 +118,7 @@ def _claim_from_keyword(
         related_metrics=list(metrics),
         evidence_source=source_url,
         confidence=confidence,
-        limitations=[
-            "此為官方揭露文字的保守主題抽取；仍需搭配年度財報數字與後續 Gemini 摘要確認語意。"
-        ],
+        limitations=["此為官方揭露文字的保守主題抽取；仍需搭配年度財報數字與後續 Gemini 摘要確認語意。"],
     )
 
 
@@ -255,11 +252,6 @@ def _summarize_html_variant(*, strategy: str, url: str, html: str | None = None,
 
 
 def fetch_investor_conference_html_variants(ticker: str, *, timeout_seconds: float = 10.0) -> list[dict[str, Any]]:
-    """Try multiple MOPS entry points and keep diagnostics for parser debugging.
-
-    MOPS 法說會頁面有一般入口與 ajax 入口。不同公司、年份與 MOPS 部署狀態
-    可能需要不同參數；這裡先快速嘗試少量策略並保存診斷，不讓 Phase 4 卡在單一路徑。
-    """
     company = _require_company(ticker)
     roc_year = _current_roc_year()
     attempts: list[tuple[str, str, str, dict[str, str]]] = [
@@ -287,11 +279,7 @@ def _best_html_variant(variants: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(fetched, key=lambda item: int(item.get("score") or 0))
 
 
-def write_investor_conference_debug_files(
-    ticker: str,
-    variants: list[dict[str, Any]],
-    debug_dir: str | Path,
-) -> dict[str, Any]:
+def write_investor_conference_debug_files(ticker: str, variants: list[dict[str, Any]], debug_dir: str | Path) -> dict[str, Any]:
     directory = Path(debug_dir)
     directory.mkdir(parents=True, exist_ok=True)
     html_files: list[str] = []
@@ -453,7 +441,7 @@ def parse_investor_conference_html(
         )
         if len(records) >= max_items:
             break
-    if records:
+    if records and any(record.status == "available" for record in records):
         return records
 
     page_preview = _preview_text(html)
@@ -472,32 +460,33 @@ def parse_investor_conference_html(
     ]
     if not links:
         limitations.append("本次 HTML 未偵測到 PDF / 簡報 / 影音附件連結；保留 MOPS 查詢入口與 debug 檔供下一步調整 POST/table parser。")
-    return [
-        InvestorConferenceRecord(
-            ticker=company.ticker,
-            company_name=company.name,
-            subindustry=company.subindustry,
-            conference_date=_extract_first_date(page_text),
-            title=f"{company.name} 法人說明會資料",
-            source_url=source,
-            document_url=document_url,
-            status=status,  # type: ignore[arg-type]
-            document_extract_status=extract_status,  # type: ignore[arg-type]
-            document_title=document_title,
-            document_text_preview=page_preview if extract_status == "html_preview" else None,
-            document_text_length=len(page_text) if page_text else None,
-            source_evidence=_dedupe([label for _, label in links] + topics),
-            extracted_topics=topics[:max_items],
-            related_metrics=related_metrics,
-            disclosure_claims=claims,
-            summary=(
-                "已從法說會頁面偵測到官方附件或主題線索，可作為年度財報之外的較即時官方文字證據。"
-                if status == "available"
-                else None
-            ),
-            limitations=limitations,
-        )
-    ]
+    page_record = InvestorConferenceRecord(
+        ticker=company.ticker,
+        company_name=company.name,
+        subindustry=company.subindustry,
+        conference_date=_extract_first_date(page_text),
+        title=f"{company.name} 法人說明會資料",
+        source_url=source,
+        document_url=document_url,
+        status=status,  # type: ignore[arg-type]
+        document_extract_status=extract_status,  # type: ignore[arg-type]
+        document_title=document_title,
+        document_text_preview=page_preview if extract_status == "html_preview" else None,
+        document_text_length=len(page_text) if page_text else None,
+        source_evidence=_dedupe([label for _, label in links] + topics),
+        extracted_topics=topics[:max_items],
+        related_metrics=related_metrics,
+        disclosure_claims=claims,
+        summary=(
+            "已從法說會頁面偵測到官方附件或主題線索，可作為年度財報之外的較即時官方文字證據。"
+            if status == "available"
+            else None
+        ),
+        limitations=limitations,
+    )
+    if page_record.status == "available":
+        return [page_record, *records[: max_items - 1]] if records else [page_record]
+    return records or [page_record]
 
 
 def build_investor_conference_metadata(
