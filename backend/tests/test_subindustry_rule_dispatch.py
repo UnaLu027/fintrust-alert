@@ -62,5 +62,7 @@ def test_foundry_rule_is_loaded_and_exposes_logic():
     result = results["FOUNDRY_CAPEX_MARGIN_001"]
     assert result.rule_scope == "foundry"
     assert result.logic_expression is not None
-    assert result.actual_values["capex_intensity"] == 50.0
+    assert result.actual_values["capex_gap_percentage_points"] > 30.0
+    assert result.actual_values["free_cash_flow"] < 0
+    assert result.actual_values["gross_margin_change_percentage_points"] < 0
     assert result.severity in {RuleSeverity.ATTENTION, RuleSeverity.HIGH_ATTENTION}
