@@ -20,6 +20,7 @@ from app.services.official_event_sources import (
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
 LIVE_DEBUG_LIMIT = 1200
+BLOCKED_ERROR_MARKERS = ("403", "forbidden", "access denied")
 
 # Official company IR pages are used only as a Phase 4 fallback when MOPS returns
 # a search shell / no-data page. They do not replace MOPS; they preserve a path to
@@ -54,6 +55,62 @@ OFFICIAL_IR_FALLBACK_URLS: dict[str, list[str]] = {
     ],
 }
 
+# Search-index fallback is deliberately narrow and source-labelled. It is used only
+# when official company sites return 403 to Codespaces but the official document
+# landing page / document URL is already known from official search results. It
+# keeps the demo progressing while preserving the blocked-source limitation.
+SEEDED_OFFICIAL_IR_INDEX: dict[str, list[dict[str, str]]] = {
+    "2330": [
+        {
+            "title": "TSMC 2026 Q2 Quarterly Results / Earnings Conference",
+            "source_url": "https://investor.tsmc.com/english/quarterly-results/2026/q2",
+            "document_url": "https://investor.tsmc.com/english/encrypt/files/encrypt_file/reports/2026-07/547d1696765e05ce3adb81c108ce1c8c1682b80c/TSMC%202Q26%20Transcript.pdf",
+            "document_title": "TSMC 2Q26 Earnings Conference Transcript",
+            "evidence_text": (
+                "TSMC 2026 second quarter quarterly results page lists Presentation Material, "
+                "Earnings Conference Transcript, Video Webcast Replay, net revenue guidance, "
+                "gross margin guidance, operating margin guidance, capital expenditure discussion, "
+                "capacity planning and outlook topics."
+            ),
+        },
+        {
+            "title": "TSMC 2026 Q1 Quarterly Results / Earnings Conference",
+            "source_url": "https://investor.tsmc.com/english/quarterly-results/2026/q1",
+            "document_url": "https://investor.tsmc.com/english/quarterly-results/2026/q1",
+            "document_title": "TSMC 1Q26 Quarterly Results Page",
+            "evidence_text": (
+                "TSMC 2026 first quarter quarterly results page lists Presentation Material, "
+                "Earnings Conference Transcript, quarterly guidance, revenue outlook, margin outlook, "
+                "capital expenditure and capacity topics."
+            ),
+        },
+    ],
+    "2303": [
+        {
+            "title": "UMC 2026 Q2 Quarterly Results / Investor Conference",
+            "source_url": "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q2",
+            "document_url": "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q2",
+            "document_title": "2Q 2026 Investors Conference Presentation Material",
+            "evidence_text": (
+                "UMC 2Q 2026 quarterly results page lists Financial Results, Investors Conference "
+                "Presentation Material, Earnings Release and Investor Conference Call Details, "
+                "teleconference webcast and replay, revenue, demand, capacity and outlook topics."
+            ),
+        },
+        {
+            "title": "UMC 2026 Q1 Quarterly Results / Investor Conference",
+            "source_url": "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q1",
+            "document_url": "https://www.umc.com/en/Download/quarterly_results/QuarterlyResultsDetail/2026/2026Q1",
+            "document_title": "1Q 2026 Investors Conference Presentation Material",
+            "evidence_text": (
+                "UMC 1Q 2026 quarterly results page lists Financial Results, Investors Conference "
+                "Presentation Material, Earnings Release and Investor Conference Call Details, "
+                "teleconference webcast and replay, revenue, demand and financial outlook topics."
+            ),
+        },
+    ],
+}
+
 IR_KEYWORDS = (
     "investor conference",
     "earnings conference",
@@ -65,12 +122,13 @@ IR_KEYWORDS = (
     "financial results",
     "quarterly results",
     "quarterly_results",
-    "財務暨營運報告說明會",
+    "guidance",
     "法人說明會",
     "法說會",
     "簡報",
     "逐字稿",
     "影音",
+    "財務暨營運報告說明會",
 )
 
 
@@ -84,6 +142,8 @@ def fetch_official_ir_html(url: str, *, timeout_seconds: float = 12.0) -> str:
         headers={
             "User-Agent": "FinTrustAlert-MIS-Project/0.1 (+https://github.com/UnaLu027/fintrust-alert)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
         },
     )
     with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - official public IR page
@@ -131,6 +191,61 @@ def _best_variant(variants: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(fetched, key=lambda item: int(item.get("score") or 0))
 
 
+def _all_variants_blocked(variants: list[dict[str, Any]]) -> bool:
+    if not variants:
+        return False
+    errors = [str(variant.get("error") or "").casefold() for variant in variants if variant.get("status") == "error"]
+    return len(errors) == len(variants) and any(
+        any(marker in error for marker in BLOCKED_ERROR_MARKERS) for error in errors
+    )
+
+
+def _seeded_official_records(
+    ticker: str,
+    *,
+    max_items: int,
+    blocked_reason: str,
+) -> list[InvestorConferenceRecord]:
+    company = get_company(ticker)
+    if company is None:
+        raise ValueError(f"Unsupported company for official IR fallback: {ticker}")
+    records: list[InvestorConferenceRecord] = []
+    for item in SEEDED_OFFICIAL_IR_INDEX.get(company.ticker, [])[:max_items]:
+        text = item["evidence_text"]
+        topics = infer_conference_topics(text, company.subindustry)
+        claims = infer_official_claims(text, source_url=item["source_url"])
+        records.append(
+            InvestorConferenceRecord(
+                ticker=company.ticker,
+                company_name=company.name,
+                subindustry=company.subindustry,
+                title=item["title"],
+                source_name="公司官方投資人關係網站（search-index fallback）",
+                source_url=item["source_url"],
+                document_url=item.get("document_url"),
+                status="available",
+                document_extract_status="document_link_found" if item.get("document_url") else "html_preview",
+                document_title=item.get("document_title"),
+                document_text_preview=text[:800],
+                document_text_length=len(text),
+                extracted_topics=topics[:max_items],
+                related_metrics=CONFERENCE_TOPIC_METRICS.get(company.subindustry, []),
+                disclosure_claims=claims,
+                source_evidence=[item["document_title"], *topics, text[:160]],
+                summary=(
+                    "官方公司 IR 網站在 Codespaces 直抓回 403；因此暫使用已知官方 IR 搜尋索引與官方 URL 作為可展示證據，"
+                    "並保留 blocked-source limitation。"
+                ),
+                limitations=[
+                    blocked_reason,
+                    "此為 search-index fallback：保留官方頁面 / 文件 URL 與摘要，不代表已成功下載 PDF 全文。",
+                    "下一步需在非封鎖環境、人工上傳文件，或以授權代理服務補做 PDF / transcript 全文抽取。",
+                ],
+            )
+        )
+    return records
+
+
 def _preview_record_from_ir_page(
     *,
     ticker: str,
@@ -145,8 +260,7 @@ def _preview_record_from_ir_page(
     topics = infer_conference_topics(text, company.subindustry)
     claims = infer_official_claims(text, source_url=source_url)
     if not claims and any(keyword.casefold() in text.casefold() for keyword in IR_KEYWORDS):
-        # Keep this bounded: enough to show an official IR conference/result page exists,
-        # but not enough for final judgement without PDF/transcript extraction.
+        # Keep this as a broad official-IR claim so Gemini/rules cannot overstate it.
         claims = infer_official_claims("營收 展望 presentation conference", source_url=source_url)
     return InvestorConferenceRecord(
         ticker=company.ticker,
@@ -209,6 +323,7 @@ def build_official_ir_fallback_metadata(
         )
 
     best = _best_variant(variants)
+    blocked_by_source = _all_variants_blocked(variants)
     debug = {
         "ticker": company.ticker,
         "source_kind": "official_company_ir_fallback",
@@ -216,8 +331,23 @@ def build_official_ir_fallback_metadata(
         "best_score": best.get("score") if best else 0,
         "variant_count": len(variants),
         "available": bool(best),
+        "blocked_by_source": blocked_by_source,
+        "fallback_mode": "live_html" if best else None,
     }
     if best is None:
+        if blocked_by_source and company.ticker in SEEDED_OFFICIAL_IR_INDEX:
+            blocked_reason = "公司官方 IR 網站在 Codespaces live fetch 回傳 403 Forbidden；改用官方 search-index fallback。"
+            seeded_records = _seeded_official_records(company.ticker, max_items=max_items, blocked_reason=blocked_reason)
+            debug.update(
+                {
+                    "available": bool(seeded_records),
+                    "fallback_mode": "seeded_official_search_index_after_403",
+                    "best_url": seeded_records[0].source_url if seeded_records else None,
+                    "best_score": 75 if seeded_records else 0,
+                    "seeded_record_count": len(seeded_records),
+                }
+            )
+            return seeded_records, debug
         return [], debug
 
     records = parse_investor_conference_html(
