@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.services.official_company_ir_sources import build_official_ir_fallback_metadata
 from app.services.official_event_sources import build_investor_conference_metadata
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,10 @@ def _load_debug_summary(ticker: str, debug_dir: Path) -> dict[str, Any] | None:
         return {"error": f"Unable to read debug summary: {exc}", "debug_summary_file": str(path)}
 
 
+def _records_are_available(records: list) -> bool:
+    return any(getattr(record, "status", None) == "available" for record in records)
+
+
 def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path | None = None) -> dict[str, Any]:
     results = []
     failures = []
@@ -33,7 +38,18 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                 fetch_live=fetch_live,
                 debug_dir=debug_path if fetch_live else None,
             )
+            mops_records = records
             debug_summary = _load_debug_summary(ticker, debug_path) if fetch_live else None
+            official_ir_debug = None
+            fallback_used = False
+            if fetch_live and not _records_are_available(records):
+                fallback_records, official_ir_debug = build_official_ir_fallback_metadata(
+                    ticker,
+                    debug_dir=debug_path,
+                )
+                if _records_are_available(fallback_records):
+                    records = fallback_records
+                    fallback_used = True
             results.append(
                 {
                     "ticker": ticker,
@@ -41,12 +57,16 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
                     "subindustry": records[0].subindustry if records else None,
                     "record_count": len(records),
                     "records": [record.model_dump(mode="json") for record in records],
-                    "status": "available" if any(record.status == "available" for record in records) else "metadata_only",
+                    "status": "available" if _records_are_available(records) else "metadata_only",
                     "document_links_found": [record.document_url for record in records if record.document_url],
                     "document_extract_statuses": [record.document_extract_status for record in records],
                     "text_preview_count": sum(1 for record in records if record.document_text_preview),
                     "claim_count": sum(len(record.disclosure_claims) for record in records),
+                    "mops_status": "available" if _records_are_available(mops_records) else "metadata_only",
+                    "fallback_used": fallback_used,
+                    "fallback_source": "official_company_ir" if fallback_used else None,
                     "live_debug": debug_summary,
+                    "official_ir_debug": official_ir_debug,
                 }
             )
         except Exception as exc:  # pragma: no cover - live smoke diagnostic path
@@ -58,6 +78,7 @@ def build_payload(*, tickers: list[str], fetch_live: bool, debug_dir: str | Path
         "debug_dir": str(debug_path) if fetch_live else None,
         "teacher_alignment": [
             "年度財報之外，開始讀取法說會 metadata / HTML preview / 附件連結",
+            "MOPS 法說會仍是優先來源；若 MOPS 回 shell/no-data，Phase 4 會暫用公司官方 IR 頁面作 fallback",
             "法說會只作為官方文字證據，不覆蓋 deterministic 財報規則結果",
             "Gemini 後續可針對 disclosure_claims 與財報指標做 evidence-grounded 摘要",
         ],
