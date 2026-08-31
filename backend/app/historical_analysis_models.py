@@ -8,6 +8,22 @@ from pydantic import BaseModel, Field
 from app.financial_analysis_models import RuleSeverity
 
 
+RuleCredibilityLevel = Literal[
+    "official_standard",
+    "peer_reviewed_literature",
+    "industry_theory",
+    "company_history_heuristic",
+    "mvp_heuristic",
+]
+RuleCalibrationStatus = Literal[
+    "official_definition",
+    "literature_supported_mvp_threshold",
+    "company_history_threshold",
+    "peer_baseline_pending",
+    "mvp_threshold",
+]
+
+
 class HistoricalPeriodRecord(BaseModel):
     ticker: str
     company_name: str
@@ -79,6 +95,13 @@ class HistoricalRuleResult(BaseModel):
     rule_scope: str = "semiconductor_common"
     logic_expression: str | None = None
     actual_values: dict[str, float | None] = Field(default_factory=dict)
+    credibility_level: RuleCredibilityLevel = "mvp_heuristic"
+    calibration_status: RuleCalibrationStatus = "mvp_threshold"
+    evidence_basis: str | None = None
+    evidence_references: list[str] = Field(default_factory=list)
+    llm_interpretation_guardrail: str = (
+        "LLM may summarize and connect this rule with official evidence, but may not change the deterministic verdict or invent missing financial values."
+    )
 
 
 class HistoricalFinancialAnalysisReport(BaseModel):
