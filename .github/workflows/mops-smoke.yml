@@ -1,0 +1,49 @@
+name: MOPS iXBRL Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/financial-statement-ai-mvp
+    paths:
+      - .github/workflows/mops-smoke.yml
+      - backend/requirements.txt
+      - backend/app/historical_analysis_models.py
+      - backend/app/ai_analysis_models.py
+      - backend/app/rules/common_analysis_rules.json
+      - backend/app/rules/semiconductor_analysis_rules.json
+      - backend/app/rules/ic_design_analysis_rules.json
+      - backend/app/services/mops_inline_xbrl.py
+      - backend/app/services/robust_mops_inline_xbrl.py
+      - backend/app/services/financial_field_extensions.py
+      - backend/app/services/historical_metrics.py
+      - backend/app/services/historical_analysis_service.py
+      - backend/app/services/analysis_feature_engine.py
+      - backend/app/services/monitorable_rule_engine.py
+      - backend/app/services/ai_financial_analysis_service.py
+      - backend/scripts/smoke_mops.py
+      - backend/scripts/smoke_mediatek_ai.py
+
+jobs:
+  live-mops-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install --quiet -r requirements.txt
+      - name: Fetch and parse TSMC 2024 annual iXBRL
+        run: python scripts/smoke_mops.py
+        env:
+          PYTHONPATH: .
+      - name: Fetch MediaTek 2022-2024 and run layered AI analysis
+        run: python scripts/smoke_mediatek_ai.py
+        env:
+          PYTHONPATH: .

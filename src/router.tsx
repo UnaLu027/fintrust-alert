@@ -6,6 +6,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { QuickVerifyPage } from "./pages/QuickVerifyPage";
 import { AnalysisResultPage } from "./pages/AnalysisResultPage";
+import { FinancialStatementAnalysisPage } from "./pages/FinancialStatementAnalysisPage";
 import { AlertsCenterPage } from "./pages/AlertsCenterPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { AboutDisclaimerPage } from "./pages/AboutDisclaimerPage";
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/dashboard" replace /> },
           { path: "dashboard", element: <DashboardPage /> },
           { path: "verify", element: <QuickVerifyPage /> },
+          { path: "financial-analysis", element: <FinancialStatementAnalysisPage /> },
           { path: "analysis/:id", element: <AnalysisResultPage /> },
           { path: "alerts", element: <AlertsCenterPage /> },
           { path: "history", element: <HistoryPage /> },

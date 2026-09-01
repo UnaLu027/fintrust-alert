@@ -14,6 +14,7 @@ export interface DashboardSummary {
 }
 
 export interface VerifyRequestPayload {
+  claimText?: string;
   keyword?: string;
   company?: string;
   ticker?: string;
@@ -27,6 +28,7 @@ export interface VerifyRequestPayload {
     | "exaggeration_detection"
     | "investment_inducement_risk"
     | "multi_source_verification"
+    | "financial_statement_verification"
     | "full_analysis"
   )[];
 }

@@ -3,13 +3,14 @@ import { NavLink } from "react-router-dom";
 const tabs = [
   { to: "/dashboard", label: "風險總覽" },
   { to: "/verify", label: "快速查證" },
+  { to: "/financial-analysis", label: "財報規則引擎" },
   { to: "/alerts", label: "追蹤提醒" },
   { to: "/history", label: "分析紀錄" },
 ];
 
 export function TopNav() {
   return (
-    <nav className="flex items-center gap-1">
+    <nav className="flex flex-wrap items-center gap-1">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}

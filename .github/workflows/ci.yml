@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - feature/financial-statement-ai-mvp
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install --quiet -r requirements-dev.txt
+      - name: Compile backend modules
+        run: python -m compileall -q app scripts
+      - name: Run backend tests
+        run: pytest -q > pytest-output.txt 2>&1
+        env:
+          PYTHONPATH: .
+      - name: Upload backend test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-output
+          path: backend/pytest-output.txt
+          if-no-files-found: error
+
+  backend-container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment and Codespaces scripts
+        run: >-
+          bash -n
+          backend/deploy-cloud-run.sh
+          backend/setup-cloud-scheduler.sh
+          scripts/deploy-cloud-run.sh
+          scripts/deploy-firebase-hosting.sh
+          scripts/codespaces-start-backend.sh
+          scripts/codespaces-run-demo.sh
+          .devcontainer/post-create.sh
+      - name: Validate devcontainer JSON
+        run: python -m json.tool .devcontainer/devcontainer.json >/dev/null
+      - name: Build Cloud Run container
+        run: docker build --tag fintrust-alert-api:ci backend

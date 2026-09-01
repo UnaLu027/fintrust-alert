@@ -11,6 +11,7 @@ export function VerifyForm() {
   const navigate = useNavigate();
   const analyze = useAnalyzeSubmit();
 
+  const [claimText, setClaimText] = useState("");
   const [keyword, setKeyword] = useState("");
   const [company, setCompany] = useState("");
   const [ticker, setTicker] = useState("");
@@ -31,12 +32,17 @@ export function VerifyForm() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!keyword && !company && !ticker && !yahooUrl && !xUrl) {
-      setError("請至少輸入一項查證條件（關鍵字、公司、股票代號或網址）");
+    if (!claimText && !keyword && !company && !ticker && !yahooUrl && !xUrl) {
+      setError("請至少貼上原始文字，或輸入一項查證條件（關鍵字、公司、股票代號或網址）");
+      return;
+    }
+    if (sources.length === 0) {
+      setError("請至少選擇一個資料來源");
       return;
     }
     try {
       const res = await analyze.mutateAsync({
+        claimText: claimText || undefined,
         keyword: keyword || undefined,
         company: company || undefined,
         ticker: ticker || undefined,
@@ -55,13 +61,36 @@ export function VerifyForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="rounded-lg border border-brand-blue/20 bg-brand-sky/40 p-4 text-sm text-brand-navy">
+        <p className="font-semibold">目前 MVP 產業範圍：半導體產業</p>
+        <p className="mt-1 text-xs leading-relaxed text-brand-muted">
+          財報量化查證會先驗證單一公司的跨期數值；不同半導體子產業不會直接進行投資優劣排名。
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-brand-navy">
+          貼上要查證的貼文或新聞文字
+        </label>
+        <textarea
+          value={claimText}
+          onChange={(e) => setClaimText(e.target.value)}
+          rows={4}
+          placeholder="例如：聯發科全年營收年增 45%，成長幅度遠高於市場預期。"
+          className="mt-1 w-full rounded-md border border-brand-border px-3 py-2 text-sm leading-relaxed outline-none focus:border-brand-blue"
+        />
+        <p className="mt-1 text-xs text-brand-muted">
+          系統會先辨識公司、期間、財務指標、方向、數值與單位，再決定是否能使用官方財報查證。
+        </p>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-sm font-medium text-brand-navy">關鍵字搜尋</label>
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="例如：AI、半導體、暴跌、明牌群組"
+            placeholder="例如：半導體、營收、毛利率、EPS"
             className="mt-1 w-full rounded-md border border-brand-border px-3 py-2 text-sm outline-none focus:border-brand-blue"
           />
         </div>
@@ -70,7 +99,7 @@ export function VerifyForm() {
           <input
             value={company}
             onChange={(e) => setCompany(e.target.value)}
-            placeholder="例如：台積電、鴻海、聯發科"
+            placeholder="例如：台積電、聯電、聯發科、日月光投控"
             className="mt-1 w-full rounded-md border border-brand-border px-3 py-2 text-sm outline-none focus:border-brand-blue"
           />
         </div>
@@ -79,7 +108,7 @@ export function VerifyForm() {
           <input
             value={ticker}
             onChange={(e) => setTicker(e.target.value)}
-            placeholder="例如：2330、2317、2454"
+            placeholder="例如：2330、2303、2454、3711"
             className="mt-1 w-full rounded-md border border-brand-border px-3 py-2 text-sm outline-none focus:border-brand-blue"
           />
         </div>

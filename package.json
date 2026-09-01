@@ -7,7 +7,20 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "demo:backend": "bash scripts/codespaces-start-backend.sh",
+    "demo:official": "bash scripts/codespaces-run-demo.sh 2330 3 2024 official",
+    "demo:fixture": "bash scripts/codespaces-run-demo.sh 2330 3 2024 demo_fixture",
+    "demo:semiconductor": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_semiconductor_companies.py --years 3 --end-year 2024",
+    "demo:semiconductor:strict": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_semiconductor_companies.py --years 3 --end-year 2024 --strict",
+    "demo:conferences": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_investor_conferences.py",
+    "demo:conferences:live": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_investor_conferences.py --fetch-live",
+    "demo:conferences:extract": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_investor_conferences.py --fetch-live --extract-documents",
+    "demo:official-evidence": "cd backend && PYTHONPATH=. .venv/bin/python scripts/smoke_official_evidence.py --ticker 2330",
+    "demo:audit": "cd backend && PYTHONPATH=. .venv/bin/python scripts/audit_financial_pipeline.py --ticker 2330",
+    "demo:diagnose-mops": "cd backend && PYTHONPATH=. .venv/bin/python scripts/diagnose_mops_mapping.py --ticker 2330 --roc-year 113 --output data/demo-output/mops-mapping-2330-2024.json",
+    "firebase:login": "npx firebase-tools login",
+    "deploy:hosting": "npm run build && npx firebase-tools deploy --only hosting --project fintrust-alert"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",

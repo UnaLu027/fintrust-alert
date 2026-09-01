@@ -43,6 +43,7 @@ export const analysisTypeLabels: Record<AnalysisType, string> = {
   exaggeration_detection: "誇大表述偵測",
   investment_inducement_risk: "投資誘導風險",
   multi_source_verification: "多來源查證",
+  financial_statement_verification: "財報量化查證",
   full_analysis: "全部分析",
 };
 
@@ -51,7 +52,9 @@ export const analysisTypeDescriptions: Record<AnalysisType, string> = {
   exaggeration_detection: "偵測暴漲、必漲、穩賺、上看等高強度投資語句",
   investment_inducement_risk: "偵測加入群組、明牌、保證獲利等語句",
   multi_source_verification: "比對 X、Yahoo 財經與公開資訊觀測站是否一致",
-  full_analysis: "綜合以上四項進行完整分析",
+  financial_statement_verification:
+    "抽取半導體公司的可量化財務主張，使用官方財報數值與確定性公式重新計算",
+  full_analysis: "綜合真偽、語氣、誘導、多來源與財報量化證據進行完整分析",
 };
 
 export const riskReasonLabels: Record<
@@ -82,6 +85,11 @@ export const riskReasonLabels: Record<
   incomplete_information: {
     label: "資訊不完整",
     explanation: "此內容缺乏完整資料來源，需搭配其他來源確認。",
+  },
+  financial_statement_mismatch: {
+    label: "與財報數值不符",
+    explanation:
+      "系統依官方財報欄位重新計算後，結果與原始主張超出容許誤差，建議查看公式、期間與來源。",
   },
 };
 
@@ -177,7 +185,7 @@ export const dashboardCopy = {
 export const verifyCopy = {
   title: "快速查證金融資訊",
   subtitle:
-    "輸入關鍵字、公司名稱、股票代號，或貼上新聞／貼文網址，系統將進行真偽輔助判斷與多來源查證。",
+    "輸入關鍵字、半導體公司、股票代號，或貼上新聞／貼文網址；系統會進行多來源查證，並對可量化主張加入官方財報證據。",
 };
 
 export const modelJudgmentTermLabel = "模型輔助判斷結果";
