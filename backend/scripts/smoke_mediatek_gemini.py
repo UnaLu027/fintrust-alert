@@ -3,6 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
+from pathlib import Path
+
+# Allow both of these entrypoints from the backend directory:
+#   python scripts/smoke_mediatek_gemini.py
+#   python -m scripts.smoke_mediatek_gemini
+# Direct script execution otherwise places only backend/scripts on sys.path,
+# which makes the sibling backend/app package unavailable on Windows.
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 from app.services.ai_financial_analysis_service import AIFinancialAnalysisService
 from app.services.historical_analysis_service import HistoricalFinancialAnalysisService
